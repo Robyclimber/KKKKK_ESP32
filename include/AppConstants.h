@@ -5,6 +5,8 @@ namespace AppConstants
 constexpr const char* FirmwareVersion = APP_FW_VERSION;
 constexpr const char* ApiVersion = APP_API_VERSION;
 constexpr const char* DeviceName = "KKKKK-ESP32";
+constexpr const char* ProvisioningSsid = "KKKKK-ESP32-Setup";
+constexpr const char* ProvisioningPassword = "kkkkk1234";
 
 constexpr unsigned long SerialBaudRate = 115200UL;
 constexpr unsigned long WifiConnectTimeoutMs = 15000UL;

@@ -11,7 +11,7 @@ CRGB leds[AppConstants::MaxLedCount];
 
 void LedRenderer::begin()
 {
-    FastLED.addLeds<WS2812B, AppConstants::LedDataPin, GRB>(leds, AppConstants::MaxLedCount);
+    FastLED.addLeds<WS2811, AppConstants::LedDataPin, GRB>(leds, AppConstants::MaxLedCount);
     FastLED.setBrightness(AppConstants::DefaultLedBrightness);
     FastLED.clear(true);
     initialized = true;

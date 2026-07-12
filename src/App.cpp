@@ -12,15 +12,17 @@ void App::setup()
     settingsStorage.begin();
     restorePersistedConfiguration();
 
+    WifiSettings wifiSettings;
     if (settingsStorage.hasWifiCredentials())
     {
         runtimeState.setState(RuntimeAppState::ConnectingWifi);
-        networkManager.begin(settingsStorage.loadWifiSettings());
+        wifiSettings = settingsStorage.loadWifiSettings();
     }
     else
     {
         runtimeState.setState(RuntimeAppState::Provisioning);
     }
+    networkManager.begin(wifiSettings);
 
     ledRenderer.begin();
     diagnostics.begin();

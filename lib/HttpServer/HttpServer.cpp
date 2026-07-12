@@ -1,5 +1,7 @@
 #include "HttpServer.h"
 
+#include <algorithm>
+
 #include <ArduinoJson.h>
 
 void HttpServer::begin(RuntimeState* runtimeStateRef,
@@ -28,6 +30,7 @@ void HttpServer::loop()
 
 void HttpServer::configureRoutes()
 {
+    server.on("/", HTTP_GET, [this]() { handleProvisioningPage(); });
     server.on("/api/health", HTTP_GET, [this]() { handleHealth(); });
     server.on("/api/status", HTTP_GET, [this]() { handleStatus(); });
     server.on("/api/config", HTTP_GET, [this]() { handleGetConfig(); });
@@ -39,6 +42,54 @@ void HttpServer::configureRoutes()
     server.on("/api/circuit/stop", HTTP_POST, [this]() { handlePostCircuitStop(); });
     server.on("/api/circuit/reset", HTTP_POST, [this]() { handlePostCircuitReset(); });
     server.on("/api/circuit/clear", HTTP_POST, [this]() { handlePostCircuitClear(); });
+    server.on("/api/test/random-sequence", HTTP_POST, [this]() { handlePostRandomSequenceTest(); });
+}
+
+void HttpServer::handleProvisioningPage()
+{
+    static const char page[] = R"HTML(
+<!doctype html>
+<html lang="it">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1">
+  <title>KKKKK ESP32 - Configurazione Wi-Fi</title>
+  <style>
+    body{font-family:system-ui,sans-serif;background:#111827;color:#f9fafb;margin:0;padding:24px}
+    main{max-width:420px;margin:8vh auto;background:#1f2937;padding:28px;border-radius:16px}
+    h1{font-size:1.4rem;margin-top:0}label{display:block;margin-top:16px}
+    input,button{box-sizing:border-box;width:100%;padding:12px;margin-top:6px;border-radius:8px;border:1px solid #4b5563}
+    input{background:#111827;color:#fff}button{background:#22c55e;color:#052e16;font-weight:700;cursor:pointer}
+    #message{min-height:24px;margin-top:18px;color:#86efac}.hint{color:#9ca3af;font-size:.9rem}
+  </style>
+</head>
+<body><main>
+  <h1>Configurazione Wi-Fi</h1>
+  <p class="hint">Inserisci la rete alla quale deve collegarsi KKKKK-ESP32.</p>
+  <form id="wifiForm">
+    <label>Nome rete (SSID)<input id="ssid" autocomplete="off" required></label>
+    <label>Password<input id="password" type="password"></label>
+    <button type="submit">Salva e collega</button>
+  </form>
+  <div id="message"></div>
+</main>
+<script>
+const form=document.getElementById('wifiForm');
+const message=document.getElementById('message');
+form.addEventListener('submit',async event=>{
+  event.preventDefault();
+  message.textContent='Salvataggio in corso...';
+  try{
+    const response=await fetch('/api/wifi/config',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({ssid:document.getElementById('ssid').value,password:document.getElementById('password').value})});
+    const result=await response.json();
+    if(!response.ok) throw new Error(result.message||'Configurazione non riuscita');
+    message.textContent='Dati salvati. La ESP32 si sta collegando alla rete.';
+  }catch(error){message.textContent='Errore: '+error.message;}
+});
+</script></body></html>
+)HTML";
+
+    server.send(200, "text/html; charset=utf-8", page);
 }
 
 void HttpServer::handleHealth()
@@ -375,6 +426,91 @@ void HttpServer::handlePostCircuitClear()
 
     const String dataJson = "{\"activeCircuitId\":null}";
     server.send(200, "application/json", buildSuccessResponse("Circuit cleared", dataJson));
+}
+
+void HttpServer::handlePostRandomSequenceTest()
+{
+    if (!wallMapRepository->hasConfig())
+    {
+        server.send(409, "application/json", buildErrorResponse("CONFIG_NOT_LOADED", "Wall config not loaded"));
+        return;
+    }
+
+    const auto& config = wallMapRepository->getConfig();
+    std::vector<const LedPointDto*> enabledPoints;
+    enabledPoints.reserve(config.points.size());
+
+    for (const auto& point : config.points)
+    {
+        if (point.enabled)
+        {
+            enabledPoints.push_back(&point);
+        }
+    }
+
+    if (enabledPoints.empty())
+    {
+        server.send(409, "application/json", buildErrorResponse("POINTS_NOT_AVAILABLE", "No enabled LED points available"));
+        return;
+    }
+
+    std::sort(enabledPoints.begin(), enabledPoints.end(), [](const LedPointDto* left, const LedPointDto* right) {
+        return left->ledIndex < right->ledIndex;
+    });
+
+    randomSeed(micros());
+    static const char* palette[] = {
+        "#FF3B30",
+        "#FF9500",
+        "#FFCC00",
+        "#34C759",
+        "#00C7BE",
+        "#007AFF",
+        "#5856D6",
+        "#FF2D55",
+        "#FFFFFF"
+    };
+
+    CircuitDefinitionDto previewCircuit;
+    previewCircuit.circuitId = "__preview_random_sequence__";
+    previewCircuit.name = "RandomSequencePreview";
+    previewCircuit.wallId = config.wallId;
+    previewCircuit.style.defaultColor = "#FFFFFF";
+    previewCircuit.style.brightness = config.brightnessLimit > 0 ? config.brightnessLimit : 180;
+    previewCircuit.style.effect = VisualEffect::Steady;
+
+    for (size_t index = 0; index < enabledPoints.size(); index++)
+    {
+        const auto* point = enabledPoints[index];
+        CircuitStepDto step;
+        step.pointId = point->pointId;
+        step.orderIndex = static_cast<int>(index);
+        step.blinkCount = 1 + random(0, 2);
+        step.blinkPeriodMs = 90 + random(0, 110);
+        step.holdDurationMs = 110 + random(0, 170);
+        step.highlightBrightness = 64 + random(0, std::max(1, previewCircuit.style.brightness - 63));
+        step.dimmedBrightness = 0;
+        step.highlightColor = palette[random(0, static_cast<long>(sizeof(palette) / sizeof(palette[0])))];
+        step.dimmedColor = "#000000";
+        step.autoAdvance = true;
+        step.enabled = true;
+        previewCircuit.steps.push_back(step);
+    }
+
+    runtimeState->setLastInputSource(RuntimeInputSource::App);
+    runtimeState->setLastCommand(RuntimeLastCommand::LedTest);
+    if (!circuitController->showPreview(previewCircuit))
+    {
+        server.send(500, "application/json", buildErrorResponse("LED_TEST_FAILED", "Unable to start random LED sequence"));
+        return;
+    }
+
+    String dataJson = "{";
+    dataJson += "\"circuitId\":\"" + previewCircuit.circuitId + "\",";
+    dataJson += "\"steps\":" + String(static_cast<int>(previewCircuit.steps.size())) + ",";
+    dataJson += "\"wallId\":\"" + config.wallId + "\"";
+    dataJson += "}";
+    server.send(200, "application/json", buildSuccessResponse("Random LED sequence started", dataJson));
 }
 
 String HttpServer::buildSuccessResponse(const String& message, const String& dataJson) const

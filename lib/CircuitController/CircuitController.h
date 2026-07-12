@@ -15,6 +15,7 @@ public:
     void loop();
 
     bool show(const String& circuitId);
+    bool showPreview(const CircuitDefinitionDto& circuit);
     bool stop();
     bool reset();
     bool clear();
@@ -25,6 +26,7 @@ public:
     unsigned long getCurrentPhaseRemainingMs() const;
 
 private:
+    const CircuitDefinitionDto* getActiveCircuitDefinition() const;
     bool resolveCircuitLedCommands(const CircuitDefinitionDto& circuit, std::vector<ResolvedLedCommand>& ledCommands);
     bool startStepSequence(const CircuitDefinitionDto& circuit);
     void resetSequenceState();
@@ -49,6 +51,8 @@ private:
     WallMapRepository* wallMapRepository = nullptr;
     LedRenderer* ledRenderer = nullptr;
     String activeCircuitId;
+    bool previewCircuitActive = false;
+    CircuitDefinitionDto previewCircuit;
     bool sequenceActive = false;
     int currentStepIndex = -1;
     SequencePhase currentPhase = SequencePhase::None;

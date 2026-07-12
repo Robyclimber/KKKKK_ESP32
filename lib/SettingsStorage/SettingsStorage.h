@@ -31,7 +31,7 @@ public:
 private:
     void loadWifiSettingsFromPreferences();
 
-    Preferences preferences;
+    mutable Preferences preferences;
     WifiSettings wifiSettings;
     bool wifiConfigured = false;
 };

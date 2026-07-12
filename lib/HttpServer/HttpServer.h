@@ -23,6 +23,7 @@ public:
 
 private:
     void configureRoutes();
+    void handleProvisioningPage();
     void handleHealth();
     void handleStatus();
     void handleGetConfig();
@@ -34,6 +35,7 @@ private:
     void handlePostCircuitStop();
     void handlePostCircuitReset();
     void handlePostCircuitClear();
+    void handlePostRandomSequenceTest();
     String buildSuccessResponse(const String& message, const String& dataJson) const;
     String buildErrorResponse(const String& errorCode, const String& message) const;
     bool parseWallConfig(const String& body, WallConfigDto& config, String& validationError) const;

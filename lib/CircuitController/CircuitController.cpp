@@ -37,6 +37,9 @@ bool CircuitController::show(const String& circuitId)
         return false;
     }
 
+    previewCircuitActive = false;
+    previewCircuit = {};
+
     if (!circuit->steps.empty())
     {
         if (!startStepSequence(*circuit))
@@ -69,6 +72,53 @@ bool CircuitController::show(const String& circuitId)
     return true;
 }
 
+bool CircuitController::showPreview(const CircuitDefinitionDto& circuit)
+{
+    if (runtimeState == nullptr || ledRenderer == nullptr || wallMapRepository == nullptr)
+    {
+        return false;
+    }
+
+    previewCircuit = circuit;
+    previewCircuitActive = true;
+
+    if (!previewCircuit.steps.empty())
+    {
+        if (!startStepSequence(previewCircuit))
+        {
+            previewCircuitActive = false;
+            previewCircuit = {};
+            return false;
+        }
+    }
+    else
+    {
+        resetSequenceState();
+
+        std::vector<ResolvedLedCommand> ledCommands;
+        if (!resolveCircuitLedCommands(previewCircuit, ledCommands))
+        {
+            previewCircuitActive = false;
+            previewCircuit = {};
+            return false;
+        }
+
+        if (!ledRenderer->showCircuit(previewCircuit, ledCommands))
+        {
+            runtimeState->setLastError("led render failed");
+            previewCircuitActive = false;
+            previewCircuit = {};
+            return false;
+        }
+    }
+
+    activeCircuitId = previewCircuit.circuitId;
+    runtimeState->setActiveCircuitId(activeCircuitId);
+    runtimeState->setState(RuntimeAppState::CircuitActive);
+    runtimeState->clearLastError();
+    return true;
+}
+
 bool CircuitController::stop()
 {
     if (runtimeState == nullptr || ledRenderer == nullptr)
@@ -79,6 +129,8 @@ bool CircuitController::stop()
     resetSequenceState();
     ledRenderer->clear();
     activeCircuitId = "";
+    previewCircuitActive = false;
+    previewCircuit = {};
     runtimeState->setActiveCircuitId(activeCircuitId);
     runtimeState->setLastCommand(RuntimeLastCommand::StopCircuit);
     runtimeState->setState(RuntimeAppState::Idle);
@@ -100,7 +152,7 @@ bool CircuitController::reset()
         return false;
     }
 
-    const auto* circuit = circuitRepository->findById(activeCircuitId);
+    const auto* circuit = getActiveCircuitDefinition();
     if (circuit == nullptr)
     {
         runtimeState->setLastError("active circuit not found");
@@ -143,6 +195,8 @@ bool CircuitController::clear()
     resetSequenceState();
     ledRenderer->clear();
     activeCircuitId = "";
+    previewCircuitActive = false;
+    previewCircuit = {};
     runtimeState->setActiveCircuitId(activeCircuitId);
     runtimeState->setLastCommand(RuntimeLastCommand::ClearCircuit);
     runtimeState->setState(RuntimeAppState::Idle);
@@ -153,6 +207,21 @@ bool CircuitController::clear()
 const String& CircuitController::getActiveCircuitId() const
 {
     return activeCircuitId;
+}
+
+const CircuitDefinitionDto* CircuitController::getActiveCircuitDefinition() const
+{
+    if (previewCircuitActive)
+    {
+        return &previewCircuit;
+    }
+
+    if (circuitRepository == nullptr || activeCircuitId.isEmpty())
+    {
+        return nullptr;
+    }
+
+    return circuitRepository->findById(activeCircuitId);
 }
 
 bool CircuitController::isSequenceActive() const
@@ -181,12 +250,12 @@ const char* CircuitController::getSequencePhaseLabel() const
 
 unsigned long CircuitController::getCurrentPhaseRemainingMs() const
 {
-    if (!sequenceActive || circuitRepository == nullptr || activeCircuitId.isEmpty())
+    if (!sequenceActive || activeCircuitId.isEmpty())
     {
         return 0UL;
     }
 
-    const auto* circuit = circuitRepository->findById(activeCircuitId);
+    const auto* circuit = getActiveCircuitDefinition();
     if (circuit == nullptr)
     {
         return 0UL;
@@ -352,7 +421,7 @@ void CircuitController::resetSequenceState()
 
 bool CircuitController::updateStepSequence()
 {
-    const auto* circuit = circuitRepository->findById(activeCircuitId);
+    const auto* circuit = getActiveCircuitDefinition();
     if (circuit == nullptr)
     {
         runtimeState->setLastError("active circuit not found");
@@ -423,6 +492,8 @@ bool CircuitController::updateStepSequence()
                 resetSequenceState();
                 runtimeState->setState(RuntimeAppState::Idle);
                 activeCircuitId = "";
+                previewCircuitActive = false;
+                previewCircuit = {};
                 runtimeState->setActiveCircuitId(activeCircuitId);
                 return true;
             }
