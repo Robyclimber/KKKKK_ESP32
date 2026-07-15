@@ -86,6 +86,40 @@ struct CircuitDefinitionDto
     std::vector<CircuitStepDto> steps;
 };
 
+struct CircuitGlobalsDto
+{
+    String presetName;
+    VisualEffect effect = VisualEffect::Steady;
+    int defaultBrightness = 96;
+    int dimmedBrightness = 48;
+    String rightHandColor = "#C44536";
+    String leftHandColor = "#247BA0";
+    String startColor = "#FFFF00";
+    String topColor = "#FF0000";
+    int blinkCount = 3;
+    int blinkPeriodMs = 250;
+    int holdDurationMs = 2500;
+};
+
+struct CircuitMovementEditorialDto
+{
+    int pointRef = -1;
+    int hand = -1;
+    int role = -1;
+    int sequence = -1;
+};
+
+struct CircuitEditorialDefinitionDto
+{
+    String circuitId;
+    String name;
+    String wallId;
+    String difficulty;
+    String inclination;
+    CircuitGlobalsDto globals;
+    std::vector<CircuitMovementEditorialDto> movements;
+};
+
 struct WallConfigDto
 {
     String wallId;

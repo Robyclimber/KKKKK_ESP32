@@ -269,9 +269,124 @@ bool SettingsStorage::loadCircuits(String& wallId, std::vector<CircuitDefinition
     return !wallId.isEmpty() && !circuits.empty();
 }
 
+bool SettingsStorage::saveEditorialCircuits(const String& wallId, const std::vector<CircuitEditorialDefinitionDto>& circuits)
+{
+    JsonDocument document;
+    document["wallId"] = wallId;
+
+    JsonArray circuitsJson = document["circuits"].to<JsonArray>();
+    for (const auto& circuit : circuits)
+    {
+        JsonObject circuitJson = circuitsJson.add<JsonObject>();
+        circuitJson["circuitId"] = circuit.circuitId;
+        circuitJson["name"] = circuit.name;
+        circuitJson["wallId"] = circuit.wallId;
+        circuitJson["difficulty"] = circuit.difficulty;
+        circuitJson["inclination"] = circuit.inclination;
+
+        JsonObject globalsJson = circuitJson["globals"].to<JsonObject>();
+        globalsJson["presetName"] = circuit.globals.presetName;
+        globalsJson["effect"] = visualEffectToString(circuit.globals.effect);
+        globalsJson["defaultBrightness"] = circuit.globals.defaultBrightness;
+        globalsJson["dimmedBrightness"] = circuit.globals.dimmedBrightness;
+        globalsJson["rightHandColor"] = circuit.globals.rightHandColor;
+        globalsJson["leftHandColor"] = circuit.globals.leftHandColor;
+        globalsJson["startColor"] = circuit.globals.startColor;
+        globalsJson["topColor"] = circuit.globals.topColor;
+        globalsJson["blinkCount"] = circuit.globals.blinkCount;
+        globalsJson["blinkPeriodMs"] = circuit.globals.blinkPeriodMs;
+        globalsJson["holdDurationMs"] = circuit.globals.holdDurationMs;
+
+        JsonArray movementsJson = circuitJson["movements"].to<JsonArray>();
+        for (const auto& movement : circuit.movements)
+        {
+            JsonObject movementJson = movementsJson.add<JsonObject>();
+            movementJson["p"] = movement.pointRef;
+            movementJson["h"] = movement.hand;
+            movementJson["r"] = movement.role;
+            movementJson["s"] = movement.sequence;
+        }
+    }
+
+    String json;
+    serializeJson(document, json);
+    preferences.putString("circuits_editorial_cfg", json);
+    preferences.putBool("circuits_editorial_ok", true);
+    return true;
+}
+
+bool SettingsStorage::loadEditorialCircuits(String& wallId, std::vector<CircuitEditorialDefinitionDto>& circuits) const
+{
+    wallId = "";
+    circuits.clear();
+
+    if (!preferences.getBool("circuits_editorial_ok", false))
+    {
+        return false;
+    }
+
+    const String json = preferences.getString("circuits_editorial_cfg", "");
+    if (json.isEmpty())
+    {
+        return false;
+    }
+
+    JsonDocument document;
+    const auto error = deserializeJson(document, json);
+    if (error)
+    {
+        return false;
+    }
+
+    wallId = String(document["wallId"] | "");
+    JsonArrayConst circuitsJson = document["circuits"].as<JsonArrayConst>();
+    for (JsonObjectConst circuitJson : circuitsJson)
+    {
+        CircuitEditorialDefinitionDto circuit;
+        circuit.circuitId = String(circuitJson["circuitId"] | "");
+        circuit.name = String(circuitJson["name"] | "");
+        circuit.wallId = String(circuitJson["wallId"] | wallId);
+        circuit.difficulty = String(circuitJson["difficulty"] | "");
+        circuit.inclination = String(circuitJson["inclination"] | "");
+
+        JsonObjectConst globalsJson = circuitJson["globals"].as<JsonObjectConst>();
+        if (!globalsJson.isNull())
+        {
+            circuit.globals.presetName = String(globalsJson["presetName"] | "");
+            circuit.globals.effect = visualEffectFromString(String(globalsJson["effect"] | "steady"));
+            circuit.globals.defaultBrightness = globalsJson["defaultBrightness"] | 96;
+            circuit.globals.dimmedBrightness = globalsJson["dimmedBrightness"] | 48;
+            circuit.globals.rightHandColor = String(globalsJson["rightHandColor"] | "#C44536");
+            circuit.globals.leftHandColor = String(globalsJson["leftHandColor"] | "#247BA0");
+            circuit.globals.startColor = String(globalsJson["startColor"] | "#FFFF00");
+            circuit.globals.topColor = String(globalsJson["topColor"] | "#FF0000");
+            circuit.globals.blinkCount = globalsJson["blinkCount"] | 3;
+            circuit.globals.blinkPeriodMs = globalsJson["blinkPeriodMs"] | 250;
+            circuit.globals.holdDurationMs = globalsJson["holdDurationMs"] | 2500;
+        }
+
+        JsonArrayConst movementsJson = circuitJson["movements"].as<JsonArrayConst>();
+        for (JsonObjectConst movementJson : movementsJson)
+        {
+            CircuitMovementEditorialDto movement;
+            movement.pointRef = movementJson["p"] | -1;
+            movement.hand = movementJson["h"] | -1;
+            movement.role = movementJson["r"] | -1;
+            movement.sequence = movementJson["s"] | -1;
+            circuit.movements.push_back(movement);
+        }
+
+        circuits.push_back(circuit);
+    }
+
+    return !wallId.isEmpty() && !circuits.empty();
+}
+
 bool SettingsStorage::clearCircuits()
 {
     preferences.remove("circuits_cfg");
     preferences.putBool("circuits_ok", false);
+    preferences.remove("circuits_editorial_cfg");
+    preferences.putBool("circuits_editorial_ok", false);
     return true;
 }

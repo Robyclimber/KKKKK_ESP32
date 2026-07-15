@@ -14,6 +14,8 @@ public:
     void begin(RuntimeState* runtimeState, CircuitRepository* circuitRepository, WallMapRepository* wallMapRepository, LedRenderer* ledRenderer);
     void loop();
 
+    bool visualize(const String& circuitId);
+    bool start(const String& circuitId);
     bool show(const String& circuitId);
     bool showPreview(const CircuitDefinitionDto& circuit);
     bool stop();
@@ -27,7 +29,8 @@ public:
 
 private:
     const CircuitDefinitionDto* getActiveCircuitDefinition() const;
-    bool resolveCircuitLedCommands(const CircuitDefinitionDto& circuit, std::vector<ResolvedLedCommand>& ledCommands);
+    bool resolveCircuitItemLedCommands(const CircuitDefinitionDto& circuit, std::vector<ResolvedLedCommand>& ledCommands);
+    bool resolveCircuitStepLedCommands(const CircuitDefinitionDto& circuit, std::vector<ResolvedLedCommand>& ledCommands);
     bool startStepSequence(const CircuitDefinitionDto& circuit);
     void resetSequenceState();
     bool updateStepSequence();

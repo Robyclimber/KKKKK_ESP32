@@ -37,7 +37,11 @@ void HttpServer::configureRoutes()
     server.on("/api/config", HTTP_POST, [this]() { handlePostConfig(); });
     server.on("/api/circuits", HTTP_GET, [this]() { handleGetCircuits(); });
     server.on("/api/circuits", HTTP_POST, [this]() { handlePostCircuits(); });
+    server.on("/api/circuits/editorial", HTTP_GET, [this]() { handleGetEditorialCircuits(); });
+    server.on("/api/circuits/editorial", HTTP_POST, [this]() { handlePostEditorialCircuits(); });
     server.on("/api/wifi/config", HTTP_POST, [this]() { handlePostWifiConfig(); });
+    server.on("/api/circuit/visualize", HTTP_POST, [this]() { handlePostCircuitVisualize(); });
+    server.on("/api/circuit/start", HTTP_POST, [this]() { handlePostCircuitStart(); });
     server.on("/api/circuit/show", HTTP_POST, [this]() { handlePostCircuitShow(); });
     server.on("/api/circuit/stop", HTTP_POST, [this]() { handlePostCircuitStop(); });
     server.on("/api/circuit/reset", HTTP_POST, [this]() { handlePostCircuitReset(); });
@@ -180,6 +184,20 @@ void HttpServer::handleGetCircuits()
     server.send(200, "application/json", buildSuccessResponse("ok", dataJson));
 }
 
+void HttpServer::handleGetEditorialCircuits()
+{
+    String wallId;
+    std::vector<CircuitEditorialDefinitionDto> circuits;
+
+    if (!settingsStorage->loadEditorialCircuits(wallId, circuits))
+    {
+        server.send(409, "application/json", buildErrorResponse("EDITORIAL_CIRCUITS_NOT_LOADED", "Editorial circuits not loaded"));
+        return;
+    }
+
+    server.send(200, "application/json", buildSuccessResponse("ok", buildEditorialCircuitsDataJson(wallId, circuits)));
+}
+
 void HttpServer::handlePostWifiConfig()
 {
     const auto body = server.arg("plain");
@@ -320,6 +338,11 @@ void HttpServer::handlePostCircuits()
     }
 
     settingsStorage->saveCircuits(wallId, circuits);
+    std::vector<CircuitEditorialDefinitionDto> editorialCircuits;
+    if (tryConvertRuntimeToEditorial(circuits, editorialCircuits, validationError))
+    {
+        settingsStorage->saveEditorialCircuits(wallId, editorialCircuits);
+    }
     runtimeState->setLastInputSource(RuntimeInputSource::App);
     runtimeState->setLastCommand(RuntimeLastCommand::SyncCircuits);
     runtimeState->clearLastError();
@@ -332,7 +355,68 @@ void HttpServer::handlePostCircuits()
     server.send(200, "application/json", buildSuccessResponse("Circuits synchronized", dataJson));
 }
 
+void HttpServer::handlePostEditorialCircuits()
+{
+    const auto body = server.arg("plain");
+    String wallId;
+    String validationError;
+    std::vector<CircuitEditorialDefinitionDto> editorialCircuits;
+
+    if (!wallMapRepository->hasConfig())
+    {
+        server.send(409, "application/json", buildErrorResponse("CONFIG_NOT_LOADED", "Wall config not loaded"));
+        return;
+    }
+
+    if (!parseEditorialCircuitsPayload(body, wallId, editorialCircuits, validationError))
+    {
+        runtimeState->setLastError(validationError);
+        server.send(400, "application/json", buildErrorResponse("EDITORIAL_CIRCUIT_INVALID", validationError));
+        return;
+    }
+
+    if (wallId != wallMapRepository->getWallId())
+    {
+        runtimeState->setLastError("wallId mismatch");
+        server.send(400, "application/json", buildErrorResponse("WALL_ID_MISMATCH", "wallId mismatch"));
+        return;
+    }
+
+    std::vector<CircuitDefinitionDto> runtimeCircuits;
+    if (!tryConvertEditorialToRuntime(editorialCircuits, runtimeCircuits, validationError))
+    {
+        runtimeState->setLastError(validationError);
+        server.send(400, "application/json", buildErrorResponse("EDITORIAL_CIRCUIT_INVALID", validationError));
+        return;
+    }
+
+    if (!circuitRepository->setCircuits(wallId, runtimeCircuits, validationError))
+    {
+        runtimeState->setLastError(validationError);
+        server.send(400, "application/json", buildErrorResponse("CIRCUIT_INVALID", validationError));
+        return;
+    }
+
+    settingsStorage->saveEditorialCircuits(wallId, editorialCircuits);
+    settingsStorage->saveCircuits(wallId, runtimeCircuits);
+    runtimeState->setLastInputSource(RuntimeInputSource::App);
+    runtimeState->setLastCommand(RuntimeLastCommand::SyncCircuits);
+    runtimeState->clearLastError();
+
+    String dataJson = "{";
+    dataJson += "\"wallId\":\"" + wallId + "\",";
+    dataJson += "\"circuitsAccepted\":" + String(static_cast<int>(editorialCircuits.size())) + ",";
+    dataJson += "\"circuitsRejected\":0";
+    dataJson += "}";
+    server.send(200, "application/json", buildSuccessResponse("Editorial circuits synchronized", dataJson));
+}
+
 void HttpServer::handlePostCircuitShow()
+{
+    handlePostCircuitStart();
+}
+
+void HttpServer::handlePostCircuitVisualize()
 {
     if (!circuitRepository->hasCircuits())
     {
@@ -357,7 +441,55 @@ void HttpServer::handlePostCircuitShow()
     }
 
     runtimeState->setLastInputSource(RuntimeInputSource::App);
-    if (!circuitController->show(circuitId))
+    if (!circuitController->visualize(circuitId))
+    {
+        const auto* circuit = circuitRepository->findById(circuitId);
+        if (circuit == nullptr)
+        {
+            runtimeState->setLastError("circuitId not found");
+            server.send(404, "application/json", buildErrorResponse("CIRCUIT_NOT_FOUND", "Circuit not found"));
+            return;
+        }
+
+        server.send(500, "application/json", buildErrorResponse("CIRCUIT_VISUALIZE_FAILED", "Unable to visualize circuit"));
+        return;
+    }
+
+    const auto* circuit = circuitRepository->findById(circuitId);
+    String dataJson = "{";
+    dataJson += "\"circuitId\":\"" + circuitId + "\",";
+    dataJson += "\"name\":\"" + circuit->name + "\"";
+    dataJson += "}";
+
+    server.send(200, "application/json", buildSuccessResponse("Circuit visualized", dataJson));
+}
+
+void HttpServer::handlePostCircuitStart()
+{
+    if (!circuitRepository->hasCircuits())
+    {
+        server.send(409, "application/json", buildErrorResponse("CIRCUITS_NOT_LOADED", "Circuits not loaded"));
+        return;
+    }
+
+    const auto body = server.arg("plain");
+    JsonDocument document;
+    const auto error = deserializeJson(document, body);
+    if (error)
+    {
+        server.send(400, "application/json", buildErrorResponse("CIRCUIT_ID_MISSING", "Invalid JSON body"));
+        return;
+    }
+
+    const auto circuitId = String(document["circuitId"] | "");
+    if (circuitId.isEmpty())
+    {
+        server.send(400, "application/json", buildErrorResponse("CIRCUIT_ID_MISSING", "Missing circuitId"));
+        return;
+    }
+
+    runtimeState->setLastInputSource(RuntimeInputSource::App);
+    if (!circuitController->start(circuitId))
     {
         const auto* circuit = circuitRepository->findById(circuitId);
         if (circuit == nullptr)
@@ -662,4 +794,323 @@ bool HttpServer::parseCircuitsPayload(const String& body,
 
     validationError = "";
     return !circuits.empty();
+}
+
+bool HttpServer::parseEditorialCircuitsPayload(const String& body,
+                                               String& wallId,
+                                               std::vector<CircuitEditorialDefinitionDto>& circuits,
+                                               String& validationError) const
+{
+    circuits.clear();
+    JsonDocument document;
+    const auto error = deserializeJson(document, body);
+    if (error)
+    {
+        validationError = "invalid JSON body";
+        return false;
+    }
+
+    wallId = String(document["wallId"] | "");
+    JsonArrayConst circuitsJson = document["circuits"].as<JsonArrayConst>();
+    if (circuitsJson.isNull())
+    {
+        validationError = "circuits array missing";
+        return false;
+    }
+
+    for (JsonObjectConst circuitJson : circuitsJson)
+    {
+        CircuitEditorialDefinitionDto circuit;
+        circuit.circuitId = String(circuitJson["circuitId"] | "");
+        circuit.name = String(circuitJson["name"] | "");
+        circuit.wallId = String(circuitJson["wallId"] | wallId);
+        circuit.difficulty = String(circuitJson["difficulty"] | "");
+        circuit.inclination = String(circuitJson["inclination"] | "");
+
+        JsonObjectConst globalsJson = circuitJson["globals"].as<JsonObjectConst>();
+        if (!globalsJson.isNull())
+        {
+            circuit.globals.presetName = String(globalsJson["presetName"] | "");
+            circuit.globals.effect = visualEffectFromString(String(globalsJson["effect"] | "steady"));
+            circuit.globals.defaultBrightness = globalsJson["defaultBrightness"] | 96;
+            circuit.globals.dimmedBrightness = globalsJson["dimmedBrightness"] | 48;
+            circuit.globals.rightHandColor = String(globalsJson["rightHandColor"] | "#C44536");
+            circuit.globals.leftHandColor = String(globalsJson["leftHandColor"] | "#247BA0");
+            circuit.globals.startColor = String(globalsJson["startColor"] | "#FFFF00");
+            circuit.globals.topColor = String(globalsJson["topColor"] | "#FF0000");
+            circuit.globals.blinkCount = globalsJson["blinkCount"] | 3;
+            circuit.globals.blinkPeriodMs = globalsJson["blinkPeriodMs"] | 250;
+            circuit.globals.holdDurationMs = globalsJson["holdDurationMs"] | 2500;
+        }
+
+        JsonArrayConst movementsJson = circuitJson["movements"].as<JsonArrayConst>();
+        if (movementsJson.isNull())
+        {
+            validationError = "movements array missing";
+            return false;
+        }
+
+        for (JsonObjectConst movementJson : movementsJson)
+        {
+            CircuitMovementEditorialDto movement;
+            movement.pointRef = movementJson["p"] | -1;
+            movement.hand = movementJson["h"] | -1;
+            movement.role = movementJson["r"] | -1;
+            movement.sequence = movementJson["s"] | -1;
+            circuit.movements.push_back(movement);
+        }
+
+        circuits.push_back(circuit);
+    }
+
+    validationError = "";
+    return !wallId.isEmpty() && !circuits.empty();
+}
+
+bool HttpServer::tryConvertEditorialToRuntime(const std::vector<CircuitEditorialDefinitionDto>& editorialCircuits,
+                                              std::vector<CircuitDefinitionDto>& runtimeCircuits,
+                                              String& validationError) const
+{
+    runtimeCircuits.clear();
+    if (wallMapRepository == nullptr)
+    {
+        validationError = "wall map unavailable";
+        return false;
+    }
+
+    for (const auto& editorialCircuit : editorialCircuits)
+    {
+        if (editorialCircuit.circuitId.isEmpty() || editorialCircuit.name.isEmpty() || editorialCircuit.wallId.isEmpty())
+        {
+            validationError = "circuitId, name and wallId are required";
+            return false;
+        }
+
+        if (editorialCircuit.movements.empty())
+        {
+            validationError = "movements must not be empty";
+            return false;
+        }
+
+        CircuitDefinitionDto runtimeCircuit;
+        runtimeCircuit.circuitId = editorialCircuit.circuitId;
+        runtimeCircuit.name = editorialCircuit.name;
+        runtimeCircuit.wallId = editorialCircuit.wallId;
+        runtimeCircuit.style.defaultColor = editorialCircuit.globals.rightHandColor;
+        runtimeCircuit.style.brightness = editorialCircuit.globals.defaultBrightness;
+        runtimeCircuit.style.effect = editorialCircuit.globals.effect;
+
+        for (const auto& movement : editorialCircuit.movements)
+        {
+            if (movement.pointRef <= 0 || movement.sequence <= 0 || (movement.hand != 0 && movement.hand != 1) || movement.role < 0 || movement.role > 2)
+            {
+                validationError = "invalid editorial movement";
+                return false;
+            }
+
+            const auto* point = wallMapRepository->findPointByHoleNumber(movement.pointRef);
+            if (point == nullptr || point->pointId.isEmpty())
+            {
+                validationError = "holeNumber not found in wall map";
+                return false;
+            }
+
+            CircuitItemDto item;
+            item.pointId = point->pointId;
+            item.role = movement.role == 1
+                ? CircuitRole::Start
+                : movement.role == 2
+                    ? CircuitRole::Top
+                    : movement.hand == 1 ? CircuitRole::RightHand : CircuitRole::LeftHand;
+            item.color = movement.role == 1
+                ? editorialCircuit.globals.startColor
+                : movement.role == 2
+                    ? editorialCircuit.globals.topColor
+                    : movement.hand == 1 ? editorialCircuit.globals.rightHandColor : editorialCircuit.globals.leftHandColor;
+            item.effect = movement.role == 2 ? VisualEffect::Pulse : editorialCircuit.globals.effect;
+            item.enabled = true;
+            runtimeCircuit.items.push_back(item);
+
+            CircuitStepDto step;
+            step.pointId = point->pointId;
+            step.orderIndex = movement.sequence - 1;
+            step.blinkCount = movement.role == 1 ? editorialCircuit.globals.blinkCount : 1;
+            step.blinkPeriodMs = editorialCircuit.globals.blinkPeriodMs;
+            step.highlightBrightness = editorialCircuit.globals.defaultBrightness;
+            step.holdDurationMs = movement.role == 2
+                ? std::max(editorialCircuit.globals.holdDurationMs, 3500)
+                : editorialCircuit.globals.holdDurationMs;
+            step.dimmedBrightness = editorialCircuit.globals.dimmedBrightness;
+            step.highlightColor = item.color;
+            step.dimmedColor = movement.role == 1
+                ? "#404000"
+                : movement.role == 2
+                    ? "#400000"
+                    : movement.hand == 1 ? "#40201C" : "#1D3440";
+            step.autoAdvance = true;
+            step.enabled = true;
+            runtimeCircuit.steps.push_back(step);
+        }
+
+        runtimeCircuits.push_back(runtimeCircuit);
+    }
+
+    validationError = "";
+    return !runtimeCircuits.empty();
+}
+
+bool HttpServer::tryConvertRuntimeToEditorial(const std::vector<CircuitDefinitionDto>& runtimeCircuits,
+                                              std::vector<CircuitEditorialDefinitionDto>& editorialCircuits,
+                                              String& validationError) const
+{
+    editorialCircuits.clear();
+    if (wallMapRepository == nullptr)
+    {
+        validationError = "wall map unavailable";
+        return false;
+    }
+
+    for (const auto& runtimeCircuit : runtimeCircuits)
+    {
+        CircuitEditorialDefinitionDto editorialCircuit;
+        editorialCircuit.circuitId = runtimeCircuit.circuitId;
+        editorialCircuit.name = runtimeCircuit.name;
+        editorialCircuit.wallId = runtimeCircuit.wallId;
+        editorialCircuit.globals.effect = runtimeCircuit.style.effect == VisualEffect::Unknown
+            ? VisualEffect::Steady
+            : runtimeCircuit.style.effect;
+        editorialCircuit.globals.defaultBrightness = runtimeCircuit.style.brightness > 0 ? runtimeCircuit.style.brightness : 96;
+        editorialCircuit.globals.dimmedBrightness = 96;
+
+        const auto orderedSteps = runtimeCircuit.steps;
+        for (const auto& step : orderedSteps)
+        {
+            const auto* point = wallMapRepository->findPointById(step.pointId);
+            if (point == nullptr || point->holeNumber <= 0)
+            {
+                validationError = "pointId not found in wall map";
+                return false;
+            }
+
+            CircuitMovementEditorialDto movement;
+            movement.pointRef = point->holeNumber;
+            movement.sequence = step.orderIndex + 1;
+
+            const auto itemIt = std::find_if(runtimeCircuit.items.begin(), runtimeCircuit.items.end(), [&](const CircuitItemDto& item) {
+                return item.pointId == step.pointId;
+            });
+
+            const auto role = itemIt == runtimeCircuit.items.end() ? CircuitRole::Unknown : itemIt->role;
+            movement.hand = role == CircuitRole::LeftHand ? 0 : 1;
+            movement.role = role == CircuitRole::Start ? 1 : role == CircuitRole::Top ? 2 : 0;
+            editorialCircuit.movements.push_back(movement);
+
+            if (itemIt != runtimeCircuit.items.end())
+            {
+                if (role == CircuitRole::Start)
+                {
+                    editorialCircuit.globals.startColor = itemIt->color;
+                }
+                else if (role == CircuitRole::Top)
+                {
+                    editorialCircuit.globals.topColor = itemIt->color;
+                }
+                else if (role == CircuitRole::LeftHand)
+                {
+                    editorialCircuit.globals.leftHandColor = itemIt->color;
+                }
+                else
+                {
+                    editorialCircuit.globals.rightHandColor = itemIt->color;
+                }
+            }
+
+            if (step.blinkCount > 1)
+            {
+                editorialCircuit.globals.blinkCount = step.blinkCount;
+            }
+
+            if (step.blinkPeriodMs > 0)
+            {
+                editorialCircuit.globals.blinkPeriodMs = step.blinkPeriodMs;
+            }
+
+            if (step.holdDurationMs > 0 && step.holdDurationMs != 3500)
+            {
+                editorialCircuit.globals.holdDurationMs = step.holdDurationMs;
+            }
+
+            if (step.dimmedBrightness >= 0)
+            {
+                editorialCircuit.globals.dimmedBrightness = step.dimmedBrightness;
+            }
+        }
+
+        std::sort(editorialCircuit.movements.begin(), editorialCircuit.movements.end(), [](const CircuitMovementEditorialDto& left, const CircuitMovementEditorialDto& right) {
+            return left.sequence < right.sequence;
+        });
+
+        editorialCircuits.push_back(editorialCircuit);
+    }
+
+    validationError = "";
+    return !editorialCircuits.empty();
+}
+
+String HttpServer::buildEditorialCircuitsDataJson(const String& wallId, const std::vector<CircuitEditorialDefinitionDto>& circuits) const
+{
+    String dataJson = "{";
+    dataJson += "\"wallId\":\"" + wallId + "\",";
+    dataJson += "\"circuits\":[";
+
+    for (size_t circuitIndex = 0; circuitIndex < circuits.size(); circuitIndex++)
+    {
+        if (circuitIndex > 0)
+        {
+            dataJson += ",";
+        }
+
+        const auto& circuit = circuits[circuitIndex];
+        dataJson += "{";
+        dataJson += "\"circuitId\":\"" + circuit.circuitId + "\",";
+        dataJson += "\"name\":\"" + circuit.name + "\",";
+        dataJson += "\"wallId\":\"" + circuit.wallId + "\",";
+        dataJson += "\"difficulty\":\"" + circuit.difficulty + "\",";
+        dataJson += "\"inclination\":\"" + circuit.inclination + "\",";
+        dataJson += "\"globals\":{";
+        dataJson += "\"presetName\":\"" + circuit.globals.presetName + "\",";
+        dataJson += "\"effect\":\"" + String(visualEffectToString(circuit.globals.effect)) + "\",";
+        dataJson += "\"defaultBrightness\":" + String(circuit.globals.defaultBrightness) + ",";
+        dataJson += "\"dimmedBrightness\":" + String(circuit.globals.dimmedBrightness) + ",";
+        dataJson += "\"rightHandColor\":\"" + circuit.globals.rightHandColor + "\",";
+        dataJson += "\"leftHandColor\":\"" + circuit.globals.leftHandColor + "\",";
+        dataJson += "\"startColor\":\"" + circuit.globals.startColor + "\",";
+        dataJson += "\"topColor\":\"" + circuit.globals.topColor + "\",";
+        dataJson += "\"blinkCount\":" + String(circuit.globals.blinkCount) + ",";
+        dataJson += "\"blinkPeriodMs\":" + String(circuit.globals.blinkPeriodMs) + ",";
+        dataJson += "\"holdDurationMs\":" + String(circuit.globals.holdDurationMs);
+        dataJson += "},";
+        dataJson += "\"movements\":[";
+
+        for (size_t movementIndex = 0; movementIndex < circuit.movements.size(); movementIndex++)
+        {
+            if (movementIndex > 0)
+            {
+                dataJson += ",";
+            }
+
+            const auto& movement = circuit.movements[movementIndex];
+            dataJson += "{";
+            dataJson += "\"p\":" + String(movement.pointRef) + ",";
+            dataJson += "\"h\":" + String(movement.hand) + ",";
+            dataJson += "\"r\":" + String(movement.role) + ",";
+            dataJson += "\"s\":" + String(movement.sequence);
+            dataJson += "}";
+        }
+
+        dataJson += "]}";
+    }
+
+    dataJson += "]}";
+    return dataJson;
 }

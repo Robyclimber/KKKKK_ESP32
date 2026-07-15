@@ -19,6 +19,8 @@ enum class RuntimeLastCommand
     WifiConfig,
     SaveConfig,
     SyncCircuits,
+    VisualizeCircuit,
+    StartCircuit,
     ShowCircuit,
     StopCircuit,
     ResetCircuit,
