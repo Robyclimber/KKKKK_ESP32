@@ -19,6 +19,9 @@ public:
     void begin();
     void clear();
     bool showCircuit(const CircuitDefinitionDto& circuit, const std::vector<ResolvedLedCommand>& ledCommands);
+    bool showAllLeds(int ledCount, const String& color, int brightness);
+    bool setLedRange(int startLedNumber, int endLedNumber, bool turnOn, const String& color, int brightness);
+    bool runStartupAnimation(const WallConfigDto& config);
     const char* getStatusLabel() const;
     const String& getLastRenderedCircuitId() const;
     int getLastRenderedLedCount() const;

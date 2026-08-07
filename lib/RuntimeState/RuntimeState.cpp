@@ -250,6 +250,10 @@ const char* RuntimeState::lastCommandToString() const
             return "SaveConfig";
         case RuntimeLastCommand::SyncCircuits:
             return "SyncCircuits";
+        case RuntimeLastCommand::VisualizeCircuit:
+            return "VisualizeCircuit";
+        case RuntimeLastCommand::StartCircuit:
+            return "StartCircuit";
         case RuntimeLastCommand::ShowCircuit:
             return "ShowCircuit";
         case RuntimeLastCommand::StopCircuit:

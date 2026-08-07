@@ -15,6 +15,12 @@ void CircuitController::begin(RuntimeState* runtimeStateRef,
 
 void CircuitController::loop()
 {
+    if (rgbTestActive)
+    {
+        updateRgbTest();
+        return;
+    }
+
     if (!sequenceActive || activeCircuitId.isEmpty())
     {
         return;
@@ -24,6 +30,11 @@ void CircuitController::loop()
 }
 
 bool CircuitController::show(const String& circuitId)
+{
+    return start(circuitId);
+}
+
+bool CircuitController::visualize(const String& circuitId)
 {
     if (runtimeState == nullptr || ledRenderer == nullptr || circuitRepository == nullptr || wallMapRepository == nullptr)
     {
@@ -37,6 +48,46 @@ bool CircuitController::show(const String& circuitId)
         return false;
     }
 
+    resetRgbTestState();
+    previewCircuitActive = false;
+    previewCircuit = {};
+    resetSequenceState();
+
+    std::vector<ResolvedLedCommand> ledCommands;
+    if (!resolveCircuitItemLedCommands(*circuit, ledCommands))
+    {
+        return false;
+    }
+
+    if (!ledRenderer->showCircuit(*circuit, ledCommands))
+    {
+        runtimeState->setLastError("led render failed");
+        return false;
+    }
+
+    activeCircuitId = circuitId;
+    runtimeState->setActiveCircuitId(activeCircuitId);
+    runtimeState->setLastCommand(RuntimeLastCommand::VisualizeCircuit);
+    runtimeState->setState(RuntimeAppState::CircuitActive);
+    runtimeState->clearLastError();
+    return true;
+}
+
+bool CircuitController::start(const String& circuitId)
+{
+    if (runtimeState == nullptr || ledRenderer == nullptr || circuitRepository == nullptr || wallMapRepository == nullptr)
+    {
+        return false;
+    }
+
+    const auto* circuit = circuitRepository->findById(circuitId);
+    if (circuit == nullptr)
+    {
+        runtimeState->setLastError("circuitId not found");
+        return false;
+    }
+
+    resetRgbTestState();
     previewCircuitActive = false;
     previewCircuit = {};
 
@@ -52,7 +103,7 @@ bool CircuitController::show(const String& circuitId)
         resetSequenceState();
 
         std::vector<ResolvedLedCommand> ledCommands;
-        if (!resolveCircuitLedCommands(*circuit, ledCommands))
+        if (!resolveCircuitItemLedCommands(*circuit, ledCommands))
         {
             return false;
         }
@@ -66,7 +117,7 @@ bool CircuitController::show(const String& circuitId)
 
     activeCircuitId = circuitId;
     runtimeState->setActiveCircuitId(activeCircuitId);
-    runtimeState->setLastCommand(RuntimeLastCommand::ShowCircuit);
+    runtimeState->setLastCommand(RuntimeLastCommand::StartCircuit);
     runtimeState->setState(RuntimeAppState::CircuitActive);
     runtimeState->clearLastError();
     return true;
@@ -79,6 +130,7 @@ bool CircuitController::showPreview(const CircuitDefinitionDto& circuit)
         return false;
     }
 
+    resetRgbTestState();
     previewCircuit = circuit;
     previewCircuitActive = true;
 
@@ -96,7 +148,7 @@ bool CircuitController::showPreview(const CircuitDefinitionDto& circuit)
         resetSequenceState();
 
         std::vector<ResolvedLedCommand> ledCommands;
-        if (!resolveCircuitLedCommands(previewCircuit, ledCommands))
+        if (!resolveCircuitStepLedCommands(previewCircuit, ledCommands))
         {
             previewCircuitActive = false;
             previewCircuit = {};
@@ -119,6 +171,93 @@ bool CircuitController::showPreview(const CircuitDefinitionDto& circuit)
     return true;
 }
 
+bool CircuitController::showAllLeds(int ledCount, const String& color, int brightness)
+{
+    if (runtimeState == nullptr || ledRenderer == nullptr)
+    {
+        return false;
+    }
+
+    resetSequenceState();
+    resetRgbTestState();
+    previewCircuitActive = false;
+    previewCircuit = {};
+    activeCircuitId = "";
+
+    if (!ledRenderer->showAllLeds(ledCount, color, brightness))
+    {
+        runtimeState->setLastError("led test render failed");
+        return false;
+    }
+
+    runtimeState->setActiveCircuitId(activeCircuitId);
+    runtimeState->setLastCommand(RuntimeLastCommand::LedTest);
+    runtimeState->setState(RuntimeAppState::CircuitActive);
+    runtimeState->clearLastError();
+    return true;
+}
+
+bool CircuitController::startAllLedsRgbTest(int ledCount, int brightness)
+{
+    if (runtimeState == nullptr || ledRenderer == nullptr)
+    {
+        return false;
+    }
+
+    resetSequenceState();
+    resetRgbTestState();
+    previewCircuitActive = false;
+    previewCircuit = {};
+    activeCircuitId = "";
+
+    rgbTestLedCount = ledCount;
+    rgbTestBrightness = brightness;
+    rgbTestStartedAtMs = millis();
+    rgbTestLastFrameAtMs = 0UL;
+    rgbTestActive = true;
+
+    // The first frame is deliberately black: red then fades in instead of all
+    // channels flashing white while the test is being started.
+    if (!ledRenderer->showAllLeds(rgbTestLedCount, "#000000", rgbTestBrightness))
+    {
+        resetRgbTestState();
+        runtimeState->setLastError("RGB led test render failed");
+        return false;
+    }
+
+    runtimeState->setActiveCircuitId(activeCircuitId);
+    runtimeState->setLastCommand(RuntimeLastCommand::LedTest);
+    runtimeState->setState(RuntimeAppState::CircuitActive);
+    runtimeState->clearLastError();
+    return true;
+}
+
+bool CircuitController::setLedRange(int startLedNumber, int endLedNumber, bool turnOn, int brightness)
+{
+    if (runtimeState == nullptr || ledRenderer == nullptr)
+    {
+        return false;
+    }
+
+    resetSequenceState();
+    resetRgbTestState();
+    previewCircuitActive = false;
+    previewCircuit = {};
+    activeCircuitId = "";
+
+    if (!ledRenderer->setLedRange(startLedNumber, endLedNumber, turnOn, "#FFFFFF", brightness))
+    {
+        runtimeState->setLastError("LED range render failed");
+        return false;
+    }
+
+    runtimeState->setActiveCircuitId(activeCircuitId);
+    runtimeState->setLastCommand(RuntimeLastCommand::LedTest);
+    runtimeState->setState(turnOn ? RuntimeAppState::CircuitActive : RuntimeAppState::Idle);
+    runtimeState->clearLastError();
+    return true;
+}
+
 bool CircuitController::stop()
 {
     if (runtimeState == nullptr || ledRenderer == nullptr)
@@ -127,6 +266,7 @@ bool CircuitController::stop()
     }
 
     resetSequenceState();
+    resetRgbTestState();
     ledRenderer->clear();
     activeCircuitId = "";
     previewCircuitActive = false;
@@ -169,7 +309,7 @@ bool CircuitController::reset()
     else
     {
         std::vector<ResolvedLedCommand> ledCommands;
-        if (!resolveCircuitLedCommands(*circuit, ledCommands))
+        if (!resolveCircuitItemLedCommands(*circuit, ledCommands))
         {
             return false;
         }
@@ -193,6 +333,7 @@ bool CircuitController::clear()
     }
 
     resetSequenceState();
+    resetRgbTestState();
     ledRenderer->clear();
     activeCircuitId = "";
     previewCircuitActive = false;
@@ -299,7 +440,7 @@ unsigned long CircuitController::getCurrentPhaseRemainingMs() const
     return 0UL;
 }
 
-bool CircuitController::resolveCircuitLedCommands(const CircuitDefinitionDto& circuit, std::vector<ResolvedLedCommand>& ledCommands)
+bool CircuitController::resolveCircuitItemLedCommands(const CircuitDefinitionDto& circuit, std::vector<ResolvedLedCommand>& ledCommands)
 {
     ledCommands.clear();
 
@@ -313,69 +454,133 @@ bool CircuitController::resolveCircuitLedCommands(const CircuitDefinitionDto& ci
         return false;
     }
 
-    if (!circuit.steps.empty())
+    for (const auto& item : circuit.items)
     {
-        for (const auto& step : circuit.steps)
+        if (!item.enabled)
         {
-            if (!step.enabled)
-            {
-                continue;
-            }
-
-            const auto* point = wallMapRepository->findPointById(step.pointId);
-            if (point == nullptr)
-            {
-                runtimeState->setLastError("pointId not found in wall map");
-                return false;
-            }
-
-            if (!point->enabled)
-            {
-                continue;
-            }
-
-            ResolvedLedCommand ledCommand;
-            ledCommand.ledIndex = point->ledIndex;
-            ledCommand.color = step.highlightColor.isEmpty() ? circuit.style.defaultColor : step.highlightColor;
-            ledCommand.effect = VisualEffect::Blink;
-            ledCommand.brightness = resolveBrightnessValue(step.highlightBrightness, circuit.style.brightness);
-            ledCommands.push_back(ledCommand);
+            continue;
         }
-    }
-    else
-    {
-        for (const auto& item : circuit.items)
+
+        const auto* point = wallMapRepository->findPointById(item.pointId);
+        if (point == nullptr)
         {
-            if (!item.enabled)
-            {
-                continue;
-            }
-
-            const auto* point = wallMapRepository->findPointById(item.pointId);
-            if (point == nullptr)
-            {
-                runtimeState->setLastError("pointId not found in wall map");
-                return false;
-            }
-
-            if (!point->enabled)
-            {
-                continue;
-            }
-
-            ResolvedLedCommand ledCommand;
-            ledCommand.ledIndex = point->ledIndex;
-            ledCommand.color = item.color.isEmpty() ? circuit.style.defaultColor : item.color;
-            ledCommand.effect = item.effect == VisualEffect::Unknown ? circuit.style.effect : item.effect;
-            ledCommand.brightness = resolveBrightnessValue(circuit.style.brightness, circuit.style.brightness);
-            ledCommands.push_back(ledCommand);
+            runtimeState->setLastError("pointId not found in wall map");
+            return false;
         }
+
+        if (!point->enabled)
+        {
+            continue;
+        }
+
+        ResolvedLedCommand ledCommand;
+        ledCommand.ledIndex = point->ledIndex;
+        ledCommand.color = item.color.isEmpty() ? circuit.style.defaultColor : item.color;
+        ledCommand.effect = item.effect == VisualEffect::Unknown ? circuit.style.effect : item.effect;
+        ledCommand.brightness = resolveBrightnessValue(circuit.style.brightness, circuit.style.brightness);
+        ledCommands.push_back(ledCommand);
     }
 
     if (ledCommands.empty())
     {
         runtimeState->setLastError("circuit has no renderable leds");
         return false;
+    }
+
+    return true;
+}
+
+bool CircuitController::resolveCircuitStepLedCommands(const CircuitDefinitionDto& circuit, std::vector<ResolvedLedCommand>& ledCommands)
+{
+    ledCommands.clear();
+
+    if (wallMapRepository == nullptr)
+    {
+        if (runtimeState != nullptr)
+        {
+            runtimeState->setLastError("wall map unavailable");
+        }
+
+        return false;
+    }
+
+    for (const auto& step : circuit.steps)
+    {
+        if (!step.enabled)
+        {
+            continue;
+        }
+
+        const auto* point = wallMapRepository->findPointById(step.pointId);
+        if (point == nullptr)
+        {
+            runtimeState->setLastError("pointId not found in wall map");
+            return false;
+        }
+
+        if (!point->enabled)
+        {
+            continue;
+        }
+
+        ResolvedLedCommand ledCommand;
+        ledCommand.ledIndex = point->ledIndex;
+        ledCommand.color = step.highlightColor.isEmpty() ? circuit.style.defaultColor : step.highlightColor;
+        ledCommand.effect = VisualEffect::Blink;
+        ledCommand.brightness = resolveBrightnessValue(step.highlightBrightness, circuit.style.brightness);
+        ledCommands.push_back(ledCommand);
+    }
+
+    if (ledCommands.empty())
+    {
+        runtimeState->setLastError("circuit has no renderable leds");
+        return false;
+    }
+
+    return true;
+}
+
+bool CircuitController::appendFootItemLedCommands(const CircuitDefinitionDto& circuit, std::vector<ResolvedLedCommand>& ledCommands)
+{
+    if (wallMapRepository == nullptr)
+    {
+        if (runtimeState != nullptr)
+        {
+            runtimeState->setLastError("wall map unavailable");
+        }
+
+        return false;
+    }
+
+    for (const auto& item : circuit.items)
+    {
+        if (!item.enabled || item.role != CircuitRole::Foot)
+        {
+            continue;
+        }
+
+        const auto* point = wallMapRepository->findPointById(item.pointId);
+        if (point == nullptr)
+        {
+            if (runtimeState != nullptr)
+            {
+                runtimeState->setLastError("foot pointId not found in wall map");
+            }
+
+            return false;
+        }
+
+        if (!point->enabled)
+        {
+            continue;
+        }
+
+        ResolvedLedCommand ledCommand;
+        ledCommand.ledIndex = point->ledIndex;
+        ledCommand.color = item.color.isEmpty() ? circuit.style.defaultColor : item.color;
+        ledCommand.effect = item.effect == VisualEffect::Unknown ? VisualEffect::Steady : item.effect;
+        ledCommand.brightness = resolveBrightnessValue(circuit.style.brightness, circuit.style.brightness);
+        ledCommands.push_back(ledCommand);
     }
 
     return true;
@@ -417,6 +622,56 @@ void CircuitController::resetSequenceState()
     lastBlinkToggleAtMs = 0UL;
     blinkToggleCount = 0;
     blinkLightOn = false;
+}
+
+void CircuitController::resetRgbTestState()
+{
+    rgbTestActive = false;
+    rgbTestLedCount = 0;
+    rgbTestBrightness = 0;
+    rgbTestStartedAtMs = 0UL;
+    rgbTestLastFrameAtMs = 0UL;
+}
+
+bool CircuitController::updateRgbTest()
+{
+    if (!rgbTestActive || ledRenderer == nullptr)
+    {
+        return false;
+    }
+
+    const unsigned long now = millis();
+    constexpr unsigned long FrameIntervalMs = 20UL;
+    constexpr unsigned long ColorDurationMs = 2000UL;
+    constexpr unsigned long FadeDurationMs = ColorDurationMs / 2UL;
+
+    if (rgbTestLastFrameAtMs != 0UL && now - rgbTestLastFrameAtMs < FrameIntervalMs)
+    {
+        return true;
+    }
+
+    rgbTestLastFrameAtMs = now;
+    const unsigned long elapsed = now - rgbTestStartedAtMs;
+    const int colorIndex = static_cast<int>((elapsed / ColorDurationMs) % 3UL);
+    const unsigned long position = elapsed % ColorDurationMs;
+    const uint8_t intensity = position <= FadeDurationMs
+                                  ? static_cast<uint8_t>((position * 255UL) / FadeDurationMs)
+                                  : static_cast<uint8_t>(((ColorDurationMs - position) * 255UL) / FadeDurationMs);
+
+    char color[8];
+    const unsigned int red = colorIndex == 0 ? intensity : 0;
+    const unsigned int green = colorIndex == 1 ? intensity : 0;
+    const unsigned int blue = colorIndex == 2 ? intensity : 0;
+    snprintf(color, sizeof(color), "#%02X%02X%02X", red, green, blue);
+
+    if (!ledRenderer->showAllLeds(rgbTestLedCount, String(color), rgbTestBrightness))
+    {
+        resetRgbTestState();
+        runtimeState->setLastError("RGB led test render failed");
+        return false;
+    }
+
+    return true;
 }
 
 bool CircuitController::updateStepSequence()
@@ -480,6 +735,11 @@ bool CircuitController::updateStepSequence()
             {
                 currentStepIndex = static_cast<int>(orderedSteps.size());
                 std::vector<ResolvedLedCommand> finalCommands;
+                if (!appendFootItemLedCommands(*circuit, finalCommands))
+                {
+                    return false;
+                }
+
                 for (const auto* step : orderedSteps)
                 {
                     if (!buildStaticCommandForStep(*circuit, *step, false, finalCommands))
@@ -513,6 +773,11 @@ bool CircuitController::updateStepSequence()
 bool CircuitController::renderStepSequenceState(const CircuitDefinitionDto& circuit)
 {
     std::vector<ResolvedLedCommand> ledCommands;
+    if (!appendFootItemLedCommands(circuit, ledCommands))
+    {
+        return false;
+    }
+
     const auto orderedSteps = getOrderedEnabledSteps(circuit);
     if (orderedSteps.empty() || currentStepIndex < 0 || currentStepIndex >= static_cast<int>(orderedSteps.size()))
     {

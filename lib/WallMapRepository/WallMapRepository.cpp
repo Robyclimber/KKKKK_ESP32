@@ -85,6 +85,19 @@ const LedPointDto* WallMapRepository::findPointById(const String& pointId) const
     return nullptr;
 }
 
+const LedPointDto* WallMapRepository::findPointByHoleNumber(int holeNumber) const
+{
+    for (const auto& point : currentConfig.points)
+    {
+        if (point.holeNumber == holeNumber)
+        {
+            return &point;
+        }
+    }
+
+    return nullptr;
+}
+
 bool WallMapRepository::validateConfig(const WallConfigDto& config, String& validationError) const
 {
     if (config.wallId.isEmpty())

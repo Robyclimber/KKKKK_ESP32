@@ -18,6 +18,7 @@ public:
     const WallConfigDto& getConfig() const;
     bool hasPointId(const String& pointId) const;
     const LedPointDto* findPointById(const String& pointId) const;
+    const LedPointDto* findPointByHoleNumber(int holeNumber) const;
 
 private:
     bool validateConfig(const WallConfigDto& config, String& validationError) const;

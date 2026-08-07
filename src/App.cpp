@@ -25,6 +25,14 @@ void App::setup()
     networkManager.begin(wifiSettings);
 
     ledRenderer.begin();
+    if (wallMapRepository.hasConfig())
+    {
+        Serial.println("Starting geometry-aware RouteLab wall animation...");
+        if (!ledRenderer.runStartupAnimation(wallMapRepository.getConfig()))
+        {
+            Serial.println("Startup animation skipped: wall geometry is not usable.");
+        }
+    }
     diagnostics.begin();
     circuitController.begin(&runtimeState, &circuitRepository, &wallMapRepository, &ledRenderer);
     buttonController.begin(&runtimeState, &circuitRepository, &circuitController);
