@@ -184,13 +184,32 @@ bool LedRenderer::runStartupAnimation(const WallConfigDto& config)
         }
     }
 
-    // Coordinate Y crescenti vanno verso il basso: questa e' la numerazione
-    // globale della parete, indipendente dal pannello a cui appartiene il foro.
+    // La numerazione globale parte dal foro in basso a sinistra: sale nella
+    // prima colonna e poi procede a serpentina nelle colonne successive.
     std::sort(orderedPoints.begin(), orderedPoints.end(), [](const LedPointDto* left, const LedPointDto* right) {
-        if (std::fabs(left->y - right->y) > 0.0001f) return left->y > right->y;
         if (std::fabs(left->x - right->x) > 0.0001f) return left->x < right->x;
+        if (std::fabs(left->y - right->y) > 0.0001f) return left->y > right->y;
         return left->ledIndex < right->ledIndex;
     });
+
+    constexpr float columnTolerance = 0.0001f;
+    for (size_t columnStart = 0, columnIndex = 0; columnStart < orderedPoints.size(); columnIndex++)
+    {
+        size_t columnEnd = columnStart + 1;
+        while (columnEnd < orderedPoints.size() && std::fabs(orderedPoints[columnEnd]->x - orderedPoints[columnStart]->x) <= columnTolerance)
+        {
+            columnEnd++;
+        }
+
+        std::sort(orderedPoints.begin() + columnStart, orderedPoints.begin() + columnEnd, [columnIndex](const LedPointDto* left, const LedPointDto* right) {
+            if (std::fabs(left->y - right->y) > 0.0001f)
+            {
+                return columnIndex % 2 == 0 ? left->y > right->y : left->y < right->y;
+            }
+            return left->ledIndex < right->ledIndex;
+        });
+        columnStart = columnEnd;
+    }
 
     float minX = 0.0f;
     float maxX = 0.0f;
