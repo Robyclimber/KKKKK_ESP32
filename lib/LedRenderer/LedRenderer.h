@@ -20,6 +20,7 @@ public:
     void clear();
     bool showCircuit(const CircuitDefinitionDto& circuit, const std::vector<ResolvedLedCommand>& ledCommands);
     bool showAllLeds(int ledCount, const String& color, int brightness);
+    bool showSingleLed(int ledIndex, const String& color, int brightness);
     bool setLedRange(int startLedNumber, int endLedNumber, bool turnOn, const String& color, int brightness);
     bool runStartupAnimation(const WallConfigDto& config);
     bool setSignText(const String& text);

@@ -264,6 +264,32 @@ bool CircuitController::setLedRange(int startLedNumber, int endLedNumber, bool t
     return true;
 }
 
+bool CircuitController::showSingleLed(int ledIndex, const String& color, int brightness)
+{
+    if (runtimeState == nullptr || ledRenderer == nullptr)
+    {
+        return false;
+    }
+
+    resetRgbTestState();
+    previewCircuitActive = false;
+    previewCircuit = {};
+    resetSequenceState();
+    activeCircuitId = "";
+
+    if (!ledRenderer->showSingleLed(ledIndex, color, brightness))
+    {
+        runtimeState->setLastError("Single LED simulation render failed");
+        return false;
+    }
+
+    runtimeState->setActiveCircuitId(activeCircuitId);
+    runtimeState->setLastCommand(RuntimeLastCommand::LedTest);
+    runtimeState->setState(RuntimeAppState::CircuitActive);
+    runtimeState->clearLastError();
+    return true;
+}
+
 bool CircuitController::stop()
 {
     if (runtimeState == nullptr || ledRenderer == nullptr)

@@ -42,6 +42,7 @@ private:
     void handlePostRandomSequenceTest();
     void handlePostAllLedsTest();
     void handlePostLedRangeTest();
+    void handlePostSimulatePoint();
     void handlePostSignText();
     String buildSuccessResponse(const String& message, const String& dataJson) const;
     String buildErrorResponse(const String& errorCode, const String& message) const;

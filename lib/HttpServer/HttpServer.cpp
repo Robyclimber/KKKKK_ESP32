@@ -51,6 +51,7 @@ void HttpServer::configureRoutes()
     server.on("/api/test/random-sequence", HTTP_POST, [this]() { handlePostRandomSequenceTest(); });
     server.on("/api/test/all-leds", HTTP_POST, [this]() { handlePostAllLedsTest(); });
     server.on("/api/test/led-range", HTTP_POST, [this]() { handlePostLedRangeTest(); });
+    server.on("/api/test/simulate-point", HTTP_POST, [this]() { handlePostSimulatePoint(); });
     server.on("/api/sign/text", HTTP_POST, [this]() { handlePostSignText(); });
 }
 
@@ -756,6 +757,51 @@ void HttpServer::handlePostLedRangeTest()
     dataJson += "\"brightness\":" + String(brightness);
     dataJson += "}";
     server.send(200, "application/json", buildSuccessResponse(turnOn ? "LED range turned on" : "LED range turned off", dataJson));
+}
+
+void HttpServer::handlePostSimulatePoint()
+{
+    JsonDocument document;
+    if (deserializeJson(document, server.arg("plain")))
+    {
+        server.send(400, "application/json", buildErrorResponse("SIMULATION_INVALID", "Invalid JSON body"));
+        return;
+    }
+
+    const String pointId = document["pointId"] | "";
+    if (pointId.isEmpty())
+    {
+        server.send(400, "application/json", buildErrorResponse("SIMULATION_INVALID", "pointId is required"));
+        return;
+    }
+
+    if (!wallMapRepository->hasConfig())
+    {
+        server.send(409, "application/json", buildErrorResponse("CONFIG_NOT_LOADED", "Wall config not loaded"));
+        return;
+    }
+
+    const LedPointDto* point = wallMapRepository->findPointById(pointId);
+    if (point == nullptr || !point->enabled)
+    {
+        server.send(404, "application/json", buildErrorResponse("POINT_NOT_FOUND", "Enabled pointId not found in wall config"));
+        return;
+    }
+
+    const int brightness = wallMapRepository->getConfig().brightnessLimit;
+    runtimeState->setLastInputSource(RuntimeInputSource::App);
+    if (!circuitController->showSingleLed(point->ledIndex, "#FFFFFF", brightness))
+    {
+        server.send(500, "application/json", buildErrorResponse("SIMULATION_FAILED", "Unable to light the selected point"));
+        return;
+    }
+
+    String dataJson = "{";
+    dataJson += "\"pointId\":\"" + pointId + "\",";
+    dataJson += "\"ledIndex\":" + String(point->ledIndex) + ",";
+    dataJson += "\"brightness\":" + String(brightness);
+    dataJson += "}";
+    server.send(200, "application/json", buildSuccessResponse("Selected point simulated", dataJson));
 }
 
 void HttpServer::handlePostSignText()

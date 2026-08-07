@@ -122,6 +122,23 @@ bool LedRenderer::showAllLeds(int ledCount, const String& color, int brightness)
     return true;
 }
 
+bool LedRenderer::showSingleLed(int ledIndex, const String& color, int brightness)
+{
+    if (!initialized || ledIndex < 0 || ledIndex >= AppConstants::MaxLedCount)
+    {
+        return false;
+    }
+
+    clearWall();
+    FastLED.setBrightness(clampBrightness(brightness));
+    leds[ledIndex] = static_cast<uint32_t>(parseHtmlColor(color));
+    FastLED.show();
+    circuitVisible = true;
+    lastRenderedCircuitId = "__simulation__";
+    lastRenderedLedCount = 1;
+    return true;
+}
+
 bool LedRenderer::setLedRange(int startLedNumber,
                               int endLedNumber,
                               bool turnOn,

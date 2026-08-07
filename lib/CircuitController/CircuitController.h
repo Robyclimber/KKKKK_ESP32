@@ -19,6 +19,7 @@ public:
     bool show(const String& circuitId);
     bool showPreview(const CircuitDefinitionDto& circuit);
     bool showAllLeds(int ledCount, const String& color, int brightness);
+    bool showSingleLed(int ledIndex, const String& color, int brightness);
     bool startAllLedsRgbTest(int ledCount, int brightness);
     bool setLedRange(int startLedNumber, int endLedNumber, bool turnOn, int brightness);
     bool setSignText(const String& text);
