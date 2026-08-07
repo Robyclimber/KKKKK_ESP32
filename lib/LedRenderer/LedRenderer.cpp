@@ -1,6 +1,7 @@
 #include "LedRenderer.h"
 
 #include <FastLED.h>
+#include <algorithm>
 #include <cmath>
 
 #include "AppConstants.h"
@@ -156,22 +157,43 @@ bool LedRenderer::runStartupAnimation(const WallConfigDto& config)
         return false;
     }
 
-    float minX = config.points.front().x;
-    float maxX = minX;
-    float minY = config.points.front().y;
-    float maxY = minY;
-    int enabledCount = 0;
+    std::vector<const LedPointDto*> orderedPoints;
+    orderedPoints.reserve(config.points.size());
     for (const auto& point : config.points)
     {
-        if (!point.enabled || point.ledIndex < 0 || point.ledIndex >= AppConstants::MaxLedCount)
+        if (point.enabled && point.ledIndex >= 0 && point.ledIndex < AppConstants::MaxLedCount)
         {
-            continue;
+            orderedPoints.push_back(&point);
         }
+    }
 
-        minX = point.x < minX ? point.x : minX;
-        maxX = point.x > maxX ? point.x : maxX;
-        minY = point.y < minY ? point.y : minY;
-        maxY = point.y > maxY ? point.y : maxY;
+    // Coordinate Y crescenti vanno verso il basso: questa e' la numerazione
+    // globale della parete, indipendente dal pannello a cui appartiene il foro.
+    std::sort(orderedPoints.begin(), orderedPoints.end(), [](const LedPointDto* left, const LedPointDto* right) {
+        if (std::fabs(left->y - right->y) > 0.0001f) return left->y > right->y;
+        if (std::fabs(left->x - right->x) > 0.0001f) return left->x < right->x;
+        return left->ledIndex < right->ledIndex;
+    });
+
+    float minX = 0.0f;
+    float maxX = 0.0f;
+    float minY = 0.0f;
+    float maxY = 0.0f;
+    int enabledCount = 0;
+    for (const auto* point : orderedPoints)
+    {
+        if (enabledCount == 0)
+        {
+            minX = maxX = point->x;
+            minY = maxY = point->y;
+        }
+        else
+        {
+            minX = point->x < minX ? point->x : minX;
+            maxX = point->x > maxX ? point->x : maxX;
+            minY = point->y < minY ? point->y : minY;
+            maxY = point->y > maxY ? point->y : maxY;
+        }
         enabledCount++;
     }
 
@@ -198,15 +220,10 @@ bool LedRenderer::runStartupAnimation(const WallConfigDto& config)
         finalLogoLedCount = 0;
 
         int ordinal = 0;
-        for (const auto& point : config.points)
+        for (const auto* point : orderedPoints)
         {
-            if (!point.enabled || point.ledIndex < 0 || point.ledIndex >= AppConstants::MaxLedCount)
-            {
-                continue;
-            }
-
-            const float x = (point.x - minX) / width;
-            const float y = (point.y - minY) / height;
+            const float x = (point->x - minX) / width;
+            const float y = (point->y - minY) / height;
             CRGB color = CRGB::Black;
 
             if (elapsed < 2800UL)
@@ -281,7 +298,7 @@ bool LedRenderer::runStartupAnimation(const WallConfigDto& config)
                 }
             }
 
-            leds[point.ledIndex] = color;
+            leds[point->ledIndex] = color;
             ordinal++;
         }
 
