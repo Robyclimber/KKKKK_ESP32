@@ -42,6 +42,7 @@ private:
     void handlePostRandomSequenceTest();
     void handlePostAllLedsTest();
     void handlePostLedRangeTest();
+    void handlePostSignText();
     String buildSuccessResponse(const String& message, const String& dataJson) const;
     String buildErrorResponse(const String& errorCode, const String& message) const;
     bool parseWallConfig(const String& body, WallConfigDto& config, String& validationError) const;

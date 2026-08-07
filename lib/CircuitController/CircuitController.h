@@ -21,6 +21,7 @@ public:
     bool showAllLeds(int ledCount, const String& color, int brightness);
     bool startAllLedsRgbTest(int ledCount, int brightness);
     bool setLedRange(int startLedNumber, int endLedNumber, bool turnOn, int brightness);
+    bool setSignText(const String& text);
     bool stop();
     bool reset();
     bool clear();

@@ -15,6 +15,7 @@ void CircuitController::begin(RuntimeState* runtimeStateRef,
 
 void CircuitController::loop()
 {
+    if (ledRenderer != nullptr) ledRenderer->loop();
     if (rgbTestActive)
     {
         updateRgbTest();
@@ -27,6 +28,11 @@ void CircuitController::loop()
     }
 
     updateStepSequence();
+}
+
+bool CircuitController::setSignText(const String& text)
+{
+    return ledRenderer != nullptr && ledRenderer->setSignText(text);
 }
 
 bool CircuitController::show(const String& circuitId)

@@ -8,6 +8,15 @@
 namespace
 {
 CRGB leds[AppConstants::MaxLedCount];
+CRGB signLeds[AppConstants::SignLedPhysicalCount];
+
+constexpr uint8_t Glyphs[][5] = {
+    {7,5,7,5,5},{6,5,6,5,6},{7,4,4,4,7},{6,5,5,5,6},{7,4,6,4,7},{7,4,6,4,4},
+    {7,4,5,5,7},{5,5,7,5,5},{7,2,2,2,7},{1,1,1,5,2},{5,5,6,5,5},{4,4,4,4,7},
+    {5,7,7,5,5},{5,7,7,7,5},{7,5,5,5,7},{7,5,7,4,4},{7,5,5,7,1},{7,5,7,6,5},
+    {7,4,7,1,7},{7,2,2,2,2},{5,5,5,5,7},{5,5,5,5,2},{5,5,7,7,5},{5,5,2,5,5},{5,5,2,2,2},{7,1,2,4,7},
+    {7,5,5,5,7},{2,6,2,2,7},{7,1,7,4,7},{7,1,7,1,7},{5,5,7,1,1},{7,4,7,1,7},{7,4,7,5,7},{7,1,2,2,2},{7,5,7,5,7},{7,5,7,1,7}
+};
 
 float distanceToSegment(float px, float py, float ax, float ay, float bx, float by)
 {
@@ -39,8 +48,11 @@ bool nearSegment(float x, float y, float ax, float ay, float bx, float by, float
 void LedRenderer::begin()
 {
     FastLED.addLeds<WS2811, AppConstants::LedDataPin, GRB>(leds, AppConstants::MaxLedCount);
+    FastLED.addLeds<WS2811, AppConstants::SignLedDataPin, GRB>(signLeds, AppConstants::SignLedPhysicalCount);
     FastLED.setBrightness(AppConstants::DefaultLedBrightness);
-    FastLED.clear(true);
+    clearWall();
+    fill_solid(signLeds, AppConstants::SignLedPhysicalCount, CRGB::Black);
+    FastLED.show();
     initialized = true;
 }
 
@@ -48,7 +60,8 @@ void LedRenderer::clear()
 {
     if (initialized)
     {
-        FastLED.clear(true);
+        clearWall();
+        FastLED.show();
     }
 
     circuitVisible = false;
@@ -63,7 +76,7 @@ bool LedRenderer::showCircuit(const CircuitDefinitionDto& circuit, const std::ve
         return false;
     }
 
-    FastLED.clear(false);
+    clearWall();
     FastLED.setBrightness(clampBrightness(circuit.style.brightness));
 
     for (const auto& ledCommand : ledCommands)
@@ -92,7 +105,7 @@ bool LedRenderer::showAllLeds(int ledCount, const String& color, int brightness)
         return false;
     }
 
-    FastLED.clear(false);
+    clearWall();
     FastLED.setBrightness(clampBrightness(brightness));
     const CRGB ledColor = static_cast<uint32_t>(parseHtmlColor(color));
 
@@ -181,7 +194,7 @@ bool LedRenderer::runStartupAnimation(const WallConfigDto& config)
     while (millis() - startedAt < durationMs)
     {
         const unsigned long elapsed = millis() - startedAt;
-        FastLED.clear(false);
+        clearWall();
         finalLogoLedCount = 0;
 
         int ordinal = 0;
@@ -280,6 +293,65 @@ bool LedRenderer::runStartupAnimation(const WallConfigDto& config)
     lastRenderedCircuitId = "__startup_routelab_logo__";
     lastRenderedLedCount = finalLogoLedCount;
     return finalLogoLedCount > 0;
+}
+
+bool LedRenderer::setSignText(const String& text)
+{
+    if (!initialized || text.isEmpty()) return false;
+    signText = text;
+    signText.toUpperCase();
+    signActive = true;
+    signScrollColumn = signText.length() <= 2 ? 0 : -AppConstants::SignMatrixColumns;
+    signLastFrameAtMs = 0UL;
+    renderSignFrame();
+    return true;
+}
+
+void LedRenderer::clearSign()
+{
+    fill_solid(signLeds, AppConstants::SignLedPhysicalCount, CRGB::Black);
+    signActive = false;
+    FastLED.show();
+}
+
+void LedRenderer::loop()
+{
+    if (!signActive || millis() - signLastFrameAtMs < AppConstants::SignScrollFrameMs) return;
+    signLastFrameAtMs = millis();
+    const int textWidth = signText.length() * 4 - 1;
+    if (signText.length() > 2 && ++signScrollColumn > textWidth) signScrollColumn = -AppConstants::SignMatrixColumns;
+    renderSignFrame();
+}
+
+void LedRenderer::clearWall()
+{
+    fill_solid(leds, AppConstants::MaxLedCount, CRGB::Black);
+}
+
+void LedRenderer::renderSignFrame()
+{
+    fill_solid(signLeds, AppConstants::SignLedPhysicalCount, CRGB::Black);
+    for (int row = 0; row < AppConstants::SignMatrixRows; ++row)
+        for (int column = 0; column < AppConstants::SignMatrixColumns; ++column)
+            if (signGlyphPixel(signScrollColumn + column, row)) signLeds[signMatrixIndex(row, column)] = CRGB::White;
+    FastLED.show();
+}
+
+bool LedRenderer::signGlyphPixel(int sourceColumn, int row) const
+{
+    if (sourceColumn < 0 || row < 0 || row >= AppConstants::SignMatrixRows) return false;
+    const int characterIndex = sourceColumn / 4;
+    const int glyphColumn = sourceColumn % 4;
+    if (glyphColumn == 3 || characterIndex >= signText.length()) return false;
+    const char character = signText[characterIndex];
+    if (character == ' ') return false;
+    const int index = character >= 'A' && character <= 'Z' ? character - 'A' : character >= '0' && character <= '9' ? 26 + character - '0' : -1;
+    return index >= 0 && (Glyphs[index][row] & (1 << (2 - glyphColumn))) != 0;
+}
+
+int LedRenderer::signMatrixIndex(int row, int column) const
+{
+    return row * AppConstants::SignMatrixColumns + (row % 2 == 0 ? column : AppConstants::SignMatrixColumns - 1 - column);
 }
 
 const char* LedRenderer::getStatusLabel() const

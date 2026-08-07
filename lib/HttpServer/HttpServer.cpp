@@ -51,6 +51,7 @@ void HttpServer::configureRoutes()
     server.on("/api/test/random-sequence", HTTP_POST, [this]() { handlePostRandomSequenceTest(); });
     server.on("/api/test/all-leds", HTTP_POST, [this]() { handlePostAllLedsTest(); });
     server.on("/api/test/led-range", HTTP_POST, [this]() { handlePostLedRangeTest(); });
+    server.on("/api/sign/text", HTTP_POST, [this]() { handlePostSignText(); });
 }
 
 void HttpServer::handleProvisioningPage()
@@ -755,6 +756,17 @@ void HttpServer::handlePostLedRangeTest()
     dataJson += "\"brightness\":" + String(brightness);
     dataJson += "}";
     server.send(200, "application/json", buildSuccessResponse(turnOn ? "LED range turned on" : "LED range turned off", dataJson));
+}
+
+void HttpServer::handlePostSignText()
+{
+    JsonDocument document;
+    if (deserializeJson(document, server.arg("plain"))) { server.send(400, "application/json", buildErrorResponse("SIGN_TEXT_INVALID", "Invalid JSON body")); return; }
+    const String text = document["text"] | "";
+    if (text.isEmpty() || text.length() > 80) { server.send(400, "application/json", buildErrorResponse("SIGN_TEXT_INVALID", "text must contain 1 to 80 characters")); return; }
+    if (circuitController == nullptr || !circuitController->setSignText(text)) { server.send(500, "application/json", buildErrorResponse("SIGN_TEXT_FAILED", "Unable to display text")); return; }
+    runtimeState->setLastInputSource(RuntimeInputSource::App);
+    server.send(200, "application/json", buildSuccessResponse("Sign text updated", "{}"));
 }
 
 String HttpServer::buildSuccessResponse(const String& message, const String& dataJson) const
