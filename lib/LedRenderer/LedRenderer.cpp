@@ -46,9 +46,10 @@ bool nearSegment(float x, float y, float ax, float ay, float bx, float by, float
 }
 }
 
-void LedRenderer::begin()
+void LedRenderer::begin(int wallLedCount)
 {
-    FastLED.addLeds<WS2811, AppConstants::LedDataPin, GRB>(leds, AppConstants::MaxLedCount);
+    configuredWallLedCount = std::max(1, std::min(wallLedCount, AppConstants::MaxLedCount));
+    FastLED.addLeds<WS2811, AppConstants::LedDataPin, GRB>(leds, configuredWallLedCount);
     FastLED.addLeds<WS2811, AppConstants::SignLedDataPin, GRB>(signLeds, AppConstants::SignLedPhysicalCount);
     FastLED.setBrightness(AppConstants::DefaultLedBrightness);
     clearWall();
@@ -101,7 +102,7 @@ bool LedRenderer::showCircuit(const CircuitDefinitionDto& circuit, const std::ve
 
 bool LedRenderer::showAllLeds(int ledCount, const String& color, int brightness)
 {
-    if (!initialized || ledCount <= 0 || ledCount > AppConstants::MaxLedCount)
+    if (!initialized || ledCount <= 0 || ledCount > configuredWallLedCount)
     {
         return false;
     }
@@ -124,7 +125,7 @@ bool LedRenderer::showAllLeds(int ledCount, const String& color, int brightness)
 
 bool LedRenderer::showSingleLed(int ledIndex, const String& color, int brightness)
 {
-    if (!initialized || ledIndex < 0 || ledIndex >= AppConstants::MaxLedCount)
+    if (!initialized || ledIndex < 0 || ledIndex >= configuredWallLedCount)
     {
         return false;
     }
@@ -146,7 +147,7 @@ bool LedRenderer::setLedRange(int startLedNumber,
                               int brightness)
 {
     if (!initialized || startLedNumber <= 0 || endLedNumber < startLedNumber ||
-        endLedNumber > AppConstants::MaxLedCount)
+        endLedNumber > configuredWallLedCount)
     {
         return false;
     }
@@ -178,7 +179,7 @@ bool LedRenderer::runStartupAnimation(const WallConfigDto& config)
     orderedPoints.reserve(config.points.size());
     for (const auto& point : config.points)
     {
-        if (point.enabled && point.ledIndex >= 0 && point.ledIndex < AppConstants::MaxLedCount)
+        if (point.enabled && point.ledIndex >= 0 && point.ledIndex < configuredWallLedCount)
         {
             orderedPoints.push_back(&point);
         }
@@ -380,7 +381,7 @@ void LedRenderer::loop()
 
 void LedRenderer::clearWall()
 {
-    fill_solid(leds, AppConstants::MaxLedCount, CRGB::Black);
+    fill_solid(leds, configuredWallLedCount, CRGB::Black);
 }
 
 void LedRenderer::renderSignFrame()

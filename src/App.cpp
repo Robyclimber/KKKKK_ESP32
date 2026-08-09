@@ -24,7 +24,10 @@ void App::setup()
     }
     networkManager.begin(wifiSettings);
 
-    ledRenderer.begin();
+    const int wallLedCount = wallMapRepository.hasConfig()
+        ? wallMapRepository.getConfig().ledCount
+        : AppConstants::MaxLedCount;
+    ledRenderer.begin(wallLedCount);
     ledRenderer.showSignFor("ROUTELAB", AppConstants::StartupSignDurationMs);
     if (wallMapRepository.hasConfig())
     {

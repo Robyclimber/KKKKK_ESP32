@@ -16,7 +16,7 @@ struct ResolvedLedCommand
 class LedRenderer
 {
 public:
-    void begin();
+    void begin(int wallLedCount);
     void clear();
     bool showCircuit(const CircuitDefinitionDto& circuit, const std::vector<ResolvedLedCommand>& ledCommands);
     bool showAllLeds(int ledCount, const String& color, int brightness);
@@ -40,6 +40,7 @@ private:
     int signMatrixIndex(int row, int column) const;
 
     bool initialized = false;
+    int configuredWallLedCount = 0;
     bool circuitVisible = false;
     String lastRenderedCircuitId;
     int lastRenderedLedCount = 0;
