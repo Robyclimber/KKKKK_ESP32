@@ -10,7 +10,7 @@ class WallMapRepository
 public:
     void clear();
     void setConfigSummary(const String& wallId, int ledCount, int disabledPoints);
-    bool setConfig(const WallConfigDto& config, String& validationError);
+    bool setConfig(WallConfigDto config, String& validationError);
     bool hasConfig() const;
     const String& getWallId() const;
     int getLedCount() const;

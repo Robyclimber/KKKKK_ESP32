@@ -1,6 +1,7 @@
 #include "WallMapRepository.h"
 
 #include <set>
+#include <utility>
 
 void WallMapRepository::clear()
 {
@@ -19,18 +20,20 @@ void WallMapRepository::setConfigSummary(const String& nextWallId, int nextLedCo
     configLoaded = !wallId.isEmpty() && ledCount > 0;
 }
 
-bool WallMapRepository::setConfig(const WallConfigDto& config, String& validationError)
+bool WallMapRepository::setConfig(WallConfigDto config, String& validationError)
 {
     if (!validateConfig(config, validationError))
     {
         return false;
     }
 
-    currentConfig = config;
-    wallId = config.wallId;
-    ledCount = config.ledCount;
+    // The wall map can contain hundreds of points. Move it into the repository
+    // rather than retaining a second full copy while an HTTP request is active.
+    currentConfig = std::move(config);
+    wallId = currentConfig.wallId;
+    ledCount = currentConfig.ledCount;
     disabledPoints = 0;
-    for (const auto& point : config.points)
+    for (const auto& point : currentConfig.points)
     {
         if (!point.enabled)
         {

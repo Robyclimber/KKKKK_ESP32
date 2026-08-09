@@ -1,6 +1,7 @@
 #include "HttpServer.h"
 
 #include <algorithm>
+#include <utility>
 
 #include <ArduinoJson.h>
 
@@ -262,14 +263,15 @@ void HttpServer::handlePostConfig()
     const bool replacesDifferentWall = wallMapRepository->hasConfig() &&
                                        wallMapRepository->getWallId() != config.wallId;
 
-    if (!wallMapRepository->setConfig(config, validationError))
+    if (!wallMapRepository->setConfig(std::move(config), validationError))
     {
         runtimeState->setLastError(validationError);
         server.send(400, "application/json", buildErrorResponse("CONFIG_INVALID", validationError));
         return;
     }
 
-    settingsStorage->saveWallConfig(config);
+    const auto& savedConfig = wallMapRepository->getConfig();
+    settingsStorage->saveWallConfig(savedConfig);
     if (replacesDifferentWall)
     {
         circuitRepository->clear();
@@ -284,8 +286,8 @@ void HttpServer::handlePostConfig()
     }
 
     String dataJson = "{";
-    dataJson += "\"wallId\":\"" + config.wallId + "\",";
-    dataJson += "\"pointsAccepted\":" + String(static_cast<int>(config.points.size())) + ",";
+    dataJson += "\"wallId\":\"" + savedConfig.wallId + "\",";
+    dataJson += "\"pointsAccepted\":" + String(static_cast<int>(savedConfig.points.size())) + ",";
     dataJson += "\"pointsDisabled\":" + String(wallMapRepository->getDisabledPoints()) + ",";
     dataJson += "\"circuitsInvalidated\":" + String(replacesDifferentWall ? "true" : "false");
     dataJson += "}";
@@ -859,6 +861,7 @@ bool HttpServer::parseWallConfig(const String& body, WallConfigDto& config, Stri
     JsonArrayConst points = document["points"].as<JsonArrayConst>();
     if (!points.isNull())
     {
+        config.points.reserve(points.size());
         for (JsonObjectConst pointJson : points)
         {
             LedPointDto point;
