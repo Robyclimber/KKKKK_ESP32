@@ -251,6 +251,7 @@ bool LedRenderer::runStartupAnimation(const WallConfigDto& config)
 
     while (millis() - startedAt < durationMs)
     {
+        loop();
         const unsigned long elapsed = millis() - startedAt;
         clearWall();
         finalLogoLedCount = 0;
@@ -354,9 +355,17 @@ bool LedRenderer::setSignText(const String& text)
     signText = text;
     signText.toUpperCase();
     signActive = true;
+    signTurnOffAtMs = 0UL;
     signScrollColumn = signText.length() <= 2 ? 0 : -AppConstants::SignMatrixColumns;
     signLastFrameAtMs = 0UL;
     renderSignFrame();
+    return true;
+}
+
+bool LedRenderer::showSignFor(const String& text, unsigned long durationMs)
+{
+    if (!setSignText(text)) return false;
+    signTurnOffAtMs = millis() + durationMs;
     return true;
 }
 
@@ -364,13 +373,21 @@ void LedRenderer::clearSign()
 {
     fill_solid(signLeds, AppConstants::SignLedPhysicalCount, CRGB::Black);
     signActive = false;
+    signTurnOffAtMs = 0UL;
     FastLED.show();
 }
 
 void LedRenderer::loop()
 {
-    if (!signActive || millis() - signLastFrameAtMs < AppConstants::SignScrollFrameMs) return;
-    signLastFrameAtMs = millis();
+    if (!signActive) return;
+    const unsigned long now = millis();
+    if (signTurnOffAtMs != 0UL && static_cast<long>(now - signTurnOffAtMs) >= 0)
+    {
+        clearSign();
+        return;
+    }
+    if (now - signLastFrameAtMs < AppConstants::SignScrollFrameMs) return;
+    signLastFrameAtMs = now;
     const int textWidth = signText.length() * 4 - 1;
     if (signText.length() > 2 && ++signScrollColumn > textWidth) signScrollColumn = -AppConstants::SignMatrixColumns;
     renderSignFrame();

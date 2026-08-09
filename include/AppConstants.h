@@ -19,6 +19,7 @@ constexpr int SignLedPhysicalCount = 50;
 constexpr int SignMatrixRows = 5;
 constexpr int SignMatrixColumns = 8;
 constexpr unsigned long SignScrollFrameMs = 120UL;
+constexpr unsigned long StartupSignDurationMs = 5000UL;
 constexpr int ButtonNextCircuitPin = 18;
 constexpr int ButtonStartStopPin = 19;
 constexpr int ButtonResetPin = 21;

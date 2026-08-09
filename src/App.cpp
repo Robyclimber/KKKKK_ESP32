@@ -25,6 +25,7 @@ void App::setup()
     networkManager.begin(wifiSettings);
 
     ledRenderer.begin();
+    ledRenderer.showSignFor("ROUTELAB", AppConstants::StartupSignDurationMs);
     if (wallMapRepository.hasConfig())
     {
         Serial.println("Starting geometry-aware RouteLab wall animation...");

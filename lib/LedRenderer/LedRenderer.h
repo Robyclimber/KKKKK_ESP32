@@ -24,6 +24,7 @@ public:
     bool setLedRange(int startLedNumber, int endLedNumber, bool turnOn, const String& color, int brightness);
     bool runStartupAnimation(const WallConfigDto& config);
     bool setSignText(const String& text);
+    bool showSignFor(const String& text, unsigned long durationMs);
     void clearSign();
     void loop();
     const char* getStatusLabel() const;
@@ -46,4 +47,5 @@ private:
     bool signActive = false;
     int signScrollColumn = 0;
     unsigned long signLastFrameAtMs = 0UL;
+    unsigned long signTurnOffAtMs = 0UL;
 };
