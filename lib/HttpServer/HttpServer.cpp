@@ -248,6 +248,12 @@ void HttpServer::handlePostWifiConfig()
 
 void HttpServer::handlePostConfig()
 {
+    // A full wall map is large. Release the persisted in-memory map before
+    // decoding its replacement so the request never holds two maps at once.
+    const bool hadConfig = wallMapRepository->hasConfig();
+    const String previousWallId = wallMapRepository->getWallId();
+    wallMapRepository->clear();
+
     WallConfigDto config;
     String validationError;
     {
@@ -260,8 +266,7 @@ void HttpServer::handlePostConfig()
         }
     }
 
-    const bool replacesDifferentWall = wallMapRepository->hasConfig() &&
-                                       wallMapRepository->getWallId() != config.wallId;
+    const bool replacesDifferentWall = hadConfig && previousWallId != config.wallId;
 
     if (!wallMapRepository->setConfig(std::move(config), validationError))
     {

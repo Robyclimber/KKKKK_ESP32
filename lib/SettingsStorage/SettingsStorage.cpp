@@ -66,38 +66,50 @@ void SettingsStorage::loadWifiSettingsFromPreferences()
 
 bool SettingsStorage::saveWallConfig(const WallConfigDto& config)
 {
-    JsonDocument document;
-    document["wallId"] = config.wallId;
-    document["wallName"] = config.wallName;
-    document["roomId"] = config.roomId;
-    document["roomName"] = config.roomName;
-    document["controllerId"] = config.controllerId;
-    document["ledCount"] = config.ledCount;
-    document["brightnessLimit"] = config.brightnessLimit;
-
-    JsonArray points = document["points"].to<JsonArray>();
-    for (const auto& point : config.points)
-    {
-        JsonObject pointJson = points.add<JsonObject>();
-        pointJson["pointId"] = point.pointId;
-        pointJson["holeNumber"] = point.holeNumber;
-        pointJson["panelName"] = point.panelName;
-        pointJson["ledIndex"] = point.ledIndex;
-        pointJson["x"] = point.x;
-        pointJson["y"] = point.y;
-        pointJson["enabled"] = point.enabled;
-        pointJson["kind"] = pointKindToString(point.kind);
-    }
-
     File file = LittleFS.open(WallConfigPath, "w");
     if (!file)
     {
         return false;
     }
 
-    const auto bytesWritten = serializeJson(document, file);
+    // Serializing hundreds of points in one JsonDocument causes a large peak
+    // allocation. Write the document incrementally so config sync fits in RAM.
+    auto writeJsonString = [&file](const String& value) {
+        JsonDocument document;
+        document.set(value);
+        return serializeJson(document, file) > 0;
+    };
+
+    bool saved = file.print("{\"wallId\":") > 0;
+    saved = saved && writeJsonString(config.wallId);
+    saved = saved && file.print(",\"wallName\":") > 0;
+    saved = saved && writeJsonString(config.wallName);
+    saved = saved && file.print(",\"roomId\":") > 0;
+    saved = saved && writeJsonString(config.roomId);
+    saved = saved && file.print(",\"roomName\":") > 0;
+    saved = saved && writeJsonString(config.roomName);
+    saved = saved && file.print(",\"controllerId\":") > 0;
+    saved = saved && writeJsonString(config.controllerId);
+    saved = saved && file.printf(",\"ledCount\":%d,\"brightnessLimit\":%d,\"points\":[", config.ledCount, config.brightnessLimit) > 0;
+
+    for (size_t index = 0; saved && index < config.points.size(); index++)
+    {
+        if (index > 0) saved = file.print(',') > 0;
+        const auto& point = config.points[index];
+        JsonDocument pointDocument;
+        pointDocument["pointId"] = point.pointId;
+        pointDocument["holeNumber"] = point.holeNumber;
+        pointDocument["panelName"] = point.panelName;
+        pointDocument["ledIndex"] = point.ledIndex;
+        pointDocument["x"] = point.x;
+        pointDocument["y"] = point.y;
+        pointDocument["enabled"] = point.enabled;
+        pointDocument["kind"] = pointKindToString(point.kind);
+        saved = serializeJson(pointDocument, file) > 0;
+    }
+
+    saved = saved && file.print("]}") > 0;
     file.close();
-    const bool saved = bytesWritten > 0;
     preferences.putBool("wall_cfg_ok", saved);
     if (saved)
     {
