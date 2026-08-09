@@ -31,6 +31,9 @@ private:
     void handleGetEditorialCircuits();
     void handlePostWifiConfig();
     void handlePostConfig();
+    void handlePostConfigBegin();
+    void handlePostConfigPoints();
+    void handlePostConfigCommit();
     void handlePostCircuits();
     void handlePostEditorialCircuits();
     void handlePostCircuitVisualize();
@@ -63,5 +66,7 @@ private:
     WallMapRepository* wallMapRepository = nullptr;
     CircuitRepository* circuitRepository = nullptr;
     CircuitController* circuitController = nullptr;
+    WallConfigDto pendingWallConfig;
+    bool wallConfigUploadActive = false;
     WebServer server{80};
 };

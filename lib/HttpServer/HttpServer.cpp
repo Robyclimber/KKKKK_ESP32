@@ -38,6 +38,9 @@ void HttpServer::configureRoutes()
     server.on("/api/status", HTTP_GET, [this]() { handleStatus(); });
     server.on("/api/config", HTTP_GET, [this]() { handleGetConfig(); });
     server.on("/api/config", HTTP_POST, [this]() { handlePostConfig(); });
+    server.on("/api/config/begin", HTTP_POST, [this]() { handlePostConfigBegin(); });
+    server.on("/api/config/points", HTTP_POST, [this]() { handlePostConfigPoints(); });
+    server.on("/api/config/commit", HTTP_POST, [this]() { handlePostConfigCommit(); });
     server.on("/api/circuits", HTTP_GET, [this]() { handleGetCircuits(); });
     server.on("/api/circuits", HTTP_POST, [this]() { handlePostCircuits(); });
     server.on("/api/circuits/editorial", HTTP_GET, [this]() { handleGetEditorialCircuits(); });
@@ -764,6 +767,112 @@ void HttpServer::handlePostLedRangeTest()
     dataJson += "\"brightness\":" + String(brightness);
     dataJson += "}";
     server.send(200, "application/json", buildSuccessResponse(turnOn ? "LED range turned on" : "LED range turned off", dataJson));
+}
+
+void HttpServer::handlePostConfigBegin()
+{
+    JsonDocument document;
+    if (deserializeJson(document, server.arg("plain")))
+    {
+        server.send(400, "application/json", buildErrorResponse("CONFIG_INVALID", "Invalid JSON body"));
+        return;
+    }
+
+    WallConfigDto config;
+    config.wallId = String(document["wallId"] | "");
+    config.wallName = String(document["wallName"] | "");
+    config.roomId = String(document["roomId"] | "");
+    config.roomName = String(document["roomName"] | "");
+    config.controllerId = String(document["controllerId"] | "");
+    config.ledCount = document["ledCount"] | 0;
+    config.brightnessLimit = document["brightnessLimit"] | 0;
+    if (config.wallId.isEmpty() || config.wallName.isEmpty() || config.ledCount <= 0 ||
+        config.ledCount > AppConstants::MaxLedCount || config.brightnessLimit < 0 || config.brightnessLimit > 255)
+    {
+        server.send(400, "application/json", buildErrorResponse("CONFIG_INVALID", "Invalid wall configuration header"));
+        return;
+    }
+
+    pendingWallConfig = std::move(config);
+    pendingWallConfig.points.clear();
+    wallConfigUploadActive = true;
+    server.send(200, "application/json", buildSuccessResponse("Configuration upload started", "{}"));
+}
+
+void HttpServer::handlePostConfigPoints()
+{
+    if (!wallConfigUploadActive)
+    {
+        server.send(409, "application/json", buildErrorResponse("CONFIG_UPLOAD_NOT_STARTED", "Start configuration upload first"));
+        return;
+    }
+
+    JsonDocument document;
+    if (deserializeJson(document, server.arg("plain")))
+    {
+        server.send(400, "application/json", buildErrorResponse("CONFIG_INVALID", "Invalid JSON body"));
+        return;
+    }
+
+    const JsonArrayConst points = document["points"].as<JsonArrayConst>();
+    if (points.isNull() || points.size() == 0 || points.size() > 32)
+    {
+        server.send(400, "application/json", buildErrorResponse("CONFIG_INVALID", "points must contain 1 to 32 entries"));
+        return;
+    }
+
+    pendingWallConfig.points.reserve(pendingWallConfig.points.size() + points.size());
+    for (JsonObjectConst pointJson : points)
+    {
+        LedPointDto point;
+        point.pointId = String(pointJson["pointId"] | "");
+        point.holeNumber = pointJson["holeNumber"] | -1;
+        point.panelName = String(pointJson["panelName"] | "");
+        point.ledIndex = pointJson["ledIndex"] | -1;
+        point.x = pointJson["x"] | 0.0f;
+        point.y = pointJson["y"] | 0.0f;
+        point.enabled = pointJson["enabled"] | true;
+        point.kind = pointKindFromString(String(pointJson["kind"] | ""));
+        pendingWallConfig.points.push_back(std::move(point));
+    }
+
+    server.send(200, "application/json", buildSuccessResponse("Configuration points accepted", "{}"));
+}
+
+void HttpServer::handlePostConfigCommit()
+{
+    if (!wallConfigUploadActive)
+    {
+        server.send(409, "application/json", buildErrorResponse("CONFIG_UPLOAD_NOT_STARTED", "Start configuration upload first"));
+        return;
+    }
+
+    const bool replacesDifferentWall = wallMapRepository->hasConfig() &&
+                                       wallMapRepository->getWallId() != pendingWallConfig.wallId;
+    String validationError;
+    if (!wallMapRepository->setConfig(std::move(pendingWallConfig), validationError))
+    {
+        wallConfigUploadActive = false;
+        runtimeState->setLastError(validationError);
+        server.send(400, "application/json", buildErrorResponse("CONFIG_INVALID", validationError));
+        return;
+    }
+
+    wallConfigUploadActive = false;
+    const auto& savedConfig = wallMapRepository->getConfig();
+    settingsStorage->saveWallConfig(savedConfig);
+    if (replacesDifferentWall)
+    {
+        circuitRepository->clear();
+        settingsStorage->clearCircuits();
+    }
+
+    runtimeState->setLastInputSource(RuntimeInputSource::App);
+    runtimeState->setLastCommand(RuntimeLastCommand::SaveConfig);
+    runtimeState->clearLastError();
+    String dataJson = "{\"wallId\":\"" + savedConfig.wallId + "\",\"pointsAccepted\":" +
+                      String(static_cast<int>(savedConfig.points.size())) + "}";
+    server.send(200, "application/json", buildSuccessResponse("Configuration saved", dataJson));
 }
 
 void HttpServer::handlePostSimulatePoint()
